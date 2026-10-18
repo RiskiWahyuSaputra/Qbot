@@ -27,6 +27,7 @@ backend integrasi **Hermes Agent**.
 - **Jawab izin & pertanyaan** agent langsung dari island.
 - **Interview Assist** — transkrip lokal (faster-whisper) + saran jawaban dari LLM.
 - **Efek suara** — bunyi saat izin masuk, task selesai, atau gagal (Sistem → Tools untuk mematikan).
+- **Sapaan harian** — sekali per hari Mochi menyapa sesuai jam dengan ringkasan hari aktif terakhir.
 - **5 tema** — Zinc, Catppuccin, Tokyo Night, Gruvbox, Nord (tombol ◐ di panel kiri).
 - **Panel 4 grup** — Agent (Hermes + sesi coding), Kerja (Projects, Dev Server),
   Sistem (CPU/RAM, 9Router, Tools), Catatan; plus mode Interview.

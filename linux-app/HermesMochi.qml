@@ -104,6 +104,7 @@ PanelWindow {
             property bool autoSafe: false     // auto-izinkan perintah baca-saja (opt-in)
             property string ntfyUrl: ""       // mis. https://ntfy.sh/topik-rahasia; kosong = mati
             property int ntfyDelay: 60        // detik menunggu sebelum dikirim ke HP
+            property string greetedDay: ""    // hari terakhir ringkasan harian ditampilkan
         }
     }
 
@@ -170,7 +171,9 @@ PanelWindow {
         path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/hermes-coucou/activity.json"
         printErrors: false // file belum ada saat pertama jalan: ditangani onLoadFailed
         onAdapterUpdated: activityWriteTimer.restart()
+        onLoaded: root.activityReady = true
         onLoadFailed: error => {
+            root.activityReady = true;
             if (error == FileViewError.FileNotFound)
                 Quickshell.execDetached(["mkdir", "-p", path.substring(0, path.lastIndexOf("/"))]);
         }
@@ -185,6 +188,31 @@ PanelWindow {
         id: activityWriteTimer
         interval: 1500
         onTriggered: activityFile.writeAdapter()
+    }
+
+    property bool activityReady: false
+    property string greetText: ""
+
+    function greetingTitle() {
+        let h = new Date().getHours();
+        let part = h >= 4 && h < 11 ? "pagi" : h < 15 ? "siang" : h < 18 ? "sore" : "malam";
+        return "Selamat " + part + ", ganteng! 👋";
+    }
+
+    // Ringkasan hari aktif terakhir sebelum hari ini, mis. "Kemarin: 5 task selesai · 3 izin".
+    function lastDaySummary() {
+        let today = dayKey(new Date());
+        let keys = Object.keys(activity.daily || {}).filter(k => k < today).sort();
+        if (keys.length === 0) return "";
+        let key = keys[keys.length - 1];
+        let d = activity.daily[key];
+        let y = new Date(); y.setDate(y.getDate() - 1);
+        let parts = key.split("-");
+        let months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+        let label = key === dayKey(y) ? "Kemarin" : Number(parts[2]) + " " + months[Number(parts[1]) - 1];
+        let out = [d.done + " task selesai", d.perms + " izin"];
+        if (d.errors) out.push(d.errors + " gagal");
+        return label + ": " + out.join(" · ");
     }
 
     function dayKey(d) {
@@ -665,7 +693,7 @@ PanelWindow {
         statusColor = opts.color;
         let timers = {task_start: taskStartNotifyTimer, done: completionCollapseTimer,
                       agent_wait: agentNotifyTimer, info: infoNotifyTimer,
-                      interview: interviewNotifyTimer};
+                      interview: interviewNotifyTimer, greet: greetNotifyTimer};
         for (let key in timers) timers[key].stop();
         if (type !== "approval" && (capsuleHover.hovered || windowHover.hovered)) {
             timers[type].restart();
@@ -4944,9 +4972,21 @@ PanelWindow {
             interval: 600
             repeat: false
             running: true
+            property int tries: 0
             onTriggered: {
+                // Tunggu settings & riwayat termuat (biasanya < 1 dtk).
+                if ((!root.settingsReady || !root.activityReady) && tries++ < 10) { restart(); return; }
+                root.greetText = root.greetingTitle();
+                let today = root.dayKey(new Date());
+                let summary = settings.greetedDay !== today ? root.lastDaySummary() : "";
+                settings.greetedDay = today;
+                if (summary) {
+                    // Sekali per hari: pill yang terbaca walau island tertutup.
+                    root.showNotification("greet", {title: root.greetText, detail: summary, color: "#22c55e", expression: "wave"});
+                    return;
+                }
                 root.avatarExpression = "wave";
-                root.currentStatus = "Halo ganteng! 👋";
+                root.currentStatus = root.greetText;
                 root.activeDetail = "QBot siap menerima task hari ini.";
                 root.statusColor = "#22c55e";
                 waveResetTimer.restart();
@@ -4977,7 +5017,23 @@ PanelWindow {
         repeat: false
         onTriggered: {
             if (root.avatarExpression === "wave") root.avatarExpression = "proud";
-            if (root.currentStatus === "Halo ganteng! 👋" && !root.isNotifying) root.restoreBaseline();
+            if (root.currentStatus === root.greetText && !root.isNotifying) root.restoreBaseline();
+        }
+    }
+
+    // Pill sapaan + ringkasan harian: cukup lama untuk dibaca.
+    Timer {
+        id: greetNotifyTimer
+        interval: 7000
+        repeat: false
+        onTriggered: {
+            if (root.notifyType === "greet") {
+                root.isNotifying = false;
+                root.notifyType = "";
+                root.restoreBaseline();
+            } else if (root.currentStatus === root.greetText) {
+                root.restoreBaseline();
+            }
         }
     }
 
