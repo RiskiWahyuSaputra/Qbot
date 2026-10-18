@@ -1036,44 +1036,6 @@ PanelWindow {
         }
     }
 
-    // Git Tracker State & Process
-    property string gitRepo: "best-cso"
-    property string gitBranch: "staging"
-    property int gitCommitsToday: 0
-    property int gitModified: 0
-    property string gitLastCommit: "-"
-
-    Process {
-        id: fetchGitStatusProcess
-        command: ["python3", root.appDir + "bridge_client.py", "get", "/gitstatus"]
-        running: false
-        stdout: SplitParser {
-            onRead: data => {
-                try {
-                    let g = JSON.parse(data);
-                    if (g.repo) root.gitRepo = g.repo;
-                    if (g.branch) root.gitBranch = g.branch;
-                    if (g.commits_today !== undefined) root.gitCommitsToday = g.commits_today;
-                    if (g.modified !== undefined) root.gitModified = g.modified;
-                    if (g.last_commit) root.gitLastCommit = g.last_commit;
-                } catch(e) {}
-            }
-        }
-    }
-
-    Timer {
-        id: gitPollTimer
-        interval: 6000
-        running: true
-        repeat: true
-        onTriggered: {
-            // Polling hanya saat panel terbuka; idle tidak menyalakan proses Python.
-            if (root.islandExpanded) {
-                fetchGitStatusProcess.running = true;
-            }
-        }
-    }
-
     // Git & Web Projects Portal State
     property var gitProjectsList: []
     property string activeGitProjectId: ""
