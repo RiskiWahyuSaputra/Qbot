@@ -148,6 +148,8 @@ python3 linux-app/agent_hooks_install.py --uninstall  # lepas entri QBot saja
   **task selesai**, dan bar hitung mundur. Pill kecil menampilkan logo tiap agent
   dengan cincin warna status (biru bekerja, oranye butuh izin, hijau selesai).
 - Tab **Agent** → kartu *Agent Coding*: semua sesi dan langkah terakhirnya.
+- **Riwayat** di tab Agent: task diterima/selesai/gagal (dengan durasi) dan
+  keputusan izin, tersimpan di `~/.local/share/hermes-coucou/activity.json`.
 - Hook/plugin tidak pernah menahan agent: timeout 0,4 dtk, error ditelan,
   selalu sukses walau QBot mati. Izin tetap dijawab di terminal.
 - Logo ada di `linux-app/assets/` (diambil dari tema ikon lokal).

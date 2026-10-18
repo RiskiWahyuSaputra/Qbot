@@ -100,6 +100,69 @@ PanelWindow {
         }
     }
 
+    // Riwayat aktivitas agent + statistik harian, di ~/.local/share/hermes-coucou/activity.json.
+    // history: [{t, agent, project, kind, text, dur}] terbaru di depan (maks 60);
+    // kind: start | done | error | allow | deny | always | answer.
+    // daily: {"YYYY-MM-DD": {tasks, done, errors, perms}} 14 hari terakhir.
+    FileView {
+        id: activityFile
+        path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/hermes-coucou/activity.json"
+        onAdapterUpdated: activityWriteTimer.restart()
+        onLoadFailed: error => {
+            if (error == FileViewError.FileNotFound)
+                Quickshell.execDetached(["mkdir", "-p", path.substring(0, path.lastIndexOf("/"))]);
+        }
+        adapter: JsonAdapter {
+            id: activity
+            property var history: []
+            property var daily: ({})
+        }
+    }
+
+    Timer {
+        id: activityWriteTimer
+        interval: 1500
+        onTriggered: activityFile.writeAdapter()
+    }
+
+    function dayKey(d) {
+        return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+
+    function logActivity(agent, project, kind, text, dur) {
+        let entry = {t: Date.now(), agent: agent || "", project: project || "", kind: kind, text: text || "", dur: dur || ""};
+        activity.history = [entry].concat(activity.history || []).slice(0, 60);
+
+        let field = {start: "tasks", done: "done", error: "errors", allow: "perms", deny: "perms", always: "perms"}[kind];
+        if (!field) return;
+        let daily = Object.assign({}, activity.daily || {});
+        let key = dayKey(new Date());
+        let today = Object.assign({tasks: 0, done: 0, errors: 0, perms: 0}, daily[key] || {});
+        today[field] += 1;
+        daily[key] = today;
+        let keys = Object.keys(daily).sort();
+        for (let i = 0; i < keys.length - 14; i++) delete daily[keys[i]];
+        activity.daily = daily;
+    }
+
+    function activityLabel(kind) {
+        return {start: "Task diterima", done: "Selesai", error: "Gagal", allow: "Diizinkan",
+                deny: "Ditolak", always: "Selalu diizinkan", answer: "Dijawab"}[kind] || kind;
+    }
+
+    function activityColor(kind) {
+        if (kind === "done" || kind === "allow" || kind === "always") return "#22c55e";
+        if (kind === "error" || kind === "deny") return "#ef4444";
+        if (kind === "start") return "#a78bfa";
+        return theme.accent;
+    }
+
+    function clockText(ms) {
+        let d = new Date(ms);
+        let time = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+        return dayKey(d) === dayKey(new Date()) ? time : d.getDate() + "/" + (d.getMonth() + 1) + " " + time;
+    }
+
     // Efek suara (assets/sounds, dibuat oleh scripts/gen-sounds.py) lewat PipeWire.
     function playSound(name) {
         if (!settings.sound) return;
@@ -266,6 +329,7 @@ PanelWindow {
     property string pendingRequestId: ""
     property string pendingDecisionId: ""
     property string pendingDecisionChoice: ""
+    property string approvalDetail: ""        // perintah approval Hermes, untuk riwayat
     property int commandSeq: 0
 
     // Sesi agent coding (Claude Code via claude_hook.py, OpenCode via plugin),
@@ -292,6 +356,7 @@ PanelWindow {
     property bool reqSending: false
     property string reqError: ""
     property string reqAnswerCmdId: ""
+    property var reqAnswerLog: null           // entri riwayat, dicatat setelah jawaban terkirim
 
     // Toast hasil aksi lokal (launch/media/clipboard)
     property string toastPrevStatus: ""
@@ -597,6 +662,9 @@ PanelWindow {
         if (!currentRequest || reqSending) return;
         reqSending = true;
         reqError = "";
+        let kind = answer.decision === "terminal" ? "" : (currentRequest.kind === "permission" ? answer.decision : "answer");
+        reqAnswerLog = kind ? {agent: currentRequest.agent, project: currentRequest.project || "", kind: kind,
+                               text: currentRequest.detail || currentRequest.title || ""} : null;
         reqAnswerCmdId = sendBridgeCommand({action: "agent_answer", request_id: currentRequest.request_id, answer: answer});
     }
 
@@ -671,9 +739,12 @@ PanelWindow {
         // Pill: task diterima, task selesai/gagal, dan permintaan izin.
         // Notifikasi "menunggu input" (idle) cukup mengubah status sesi.
         if (msg.event === "AgentPrompt") {
+            logActivity(agent, sess.project, "start", text || "Prompt baru");
             showNotification("task_start", {source: agent, title: "Task diterima", detail: text || "Prompt baru",
                                             color: "#a78bfa", expression: "task_start", project: sess.project});
         } else if (msg.event === "AgentStop") {
+            logActivity(agent, sess.project, failed ? "error" : "done", failed ? text : (sess.prompt || "Giliran selesai"),
+                        sess.promptAt ? formatDuration(Date.now() - sess.promptAt) : "");
             showNotification("done", {source: agent, title: failed ? "Task gagal" : "Task selesai",
                                       detail: failed ? text : (sess.prompt || "Giliran selesai"),
                                       color: failed ? "#ef4444" : "#22c55e", expression: failed ? "dizzy" : "celebrate",
@@ -830,8 +901,9 @@ PanelWindow {
                 root.pendingDecisionId = "";
                 root.approvalActionable = true;
                 root.decisionPending = false;
+                root.approvalDetail = msg.message || (msg.tool_name ? "Tool: " + msg.tool_name : "Action needs approval");
                 root.showNotification("approval", {source: "hermes", title: "Approval Required",
-                    detail: msg.message || (msg.tool_name ? "Tool: " + msg.tool_name : "Action needs approval"),
+                    detail: root.approvalDetail,
                     color: "#eab308", expression: "angry"});
             } else {
                 // Event sintetis/demo (tanpa request Hermes asli): tampil info saja,
@@ -866,6 +938,7 @@ PanelWindow {
             root.pendingDecisionId = "";
             root.decisionPending = false;
             if (msg.ok) {
+                root.logActivity("hermes", "", allowed ? "allow" : "deny", root.approvalDetail);
                 root.pendingSessionId = "";
                 root.pendingRequestId = "";
                 root.approvalActionable = false;
@@ -899,6 +972,11 @@ PanelWindow {
         case "ActionResult":
             if (msg.id && msg.id === root.reqAnswerCmdId) {
                 root.reqAnswerCmdId = "";
+                if (msg.ok && root.reqAnswerLog) {
+                    let e = root.reqAnswerLog;
+                    root.logActivity(e.agent, e.project, e.kind, e.text);
+                }
+                root.reqAnswerLog = null;
                 if (!msg.ok) {
                     // Gagal: kartu tetap terbuka supaya bisa dicoba lagi / dijawab di terminal.
                     root.reqSending = false;
@@ -959,6 +1037,7 @@ PanelWindow {
             break;
 
         case "TaskStarted":
+            root.logActivity("hermes", "", "start", msg.message || "Task baru");
             root.hermesWorking = true;
             root.hermesTaskStartedAt = Date.now();
             root.showNotification("task_start", {source: "hermes", title: "Task diterima",
@@ -976,6 +1055,7 @@ PanelWindow {
             root.hermesWorking = false;
             let took = root.hermesTaskStartedAt > 0 ? root.formatDuration(Date.now() - root.hermesTaskStartedAt) : "";
             root.hermesTaskStartedAt = 0;
+            root.logActivity("hermes", "", "done", msg.message || "Task selesai", took);
             root.showNotification("done", {source: "hermes", title: "Task selesai",
                 detail: msg.message || "Task selesai!", color: "#22c55e", expression: "celebrate", duration: took});
             break;
@@ -3364,9 +3444,81 @@ PanelWindow {
                         }
                     }
 
-                    Item {
+                    // Riwayat: task diterima/selesai dan keputusan izin, terbaru di atas.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "RIWAYAT"; color: root.theme.subtext0; font.pixelSize: 10; font.bold: true }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            readonly property var today: (activity.daily || {})[root.dayKey(new Date())]
+                            visible: !!today
+                            text: today ? "Hari ini: " + today.done + " selesai · " + today.perms + " izin" + (today.errors ? " · " + today.errors + " gagal" : "") : ""
+                            color: root.theme.subtext0; font.pixelSize: 9
+                        }
+                    }
+
+                    Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        radius: 8
+                        color: root.theme.mantle
+                        border.color: root.theme.surface1
+
+                        ListView {
+                            id: historyView
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 2
+                            clip: true
+                            model: activity.history || []
+                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                            Text {
+                                anchors.centerIn: parent
+                                visible: historyView.count === 0
+                                text: "Belum ada aktivitas tercatat"
+                                color: root.theme.overlay
+                                font.pixelSize: 10
+                            }
+
+                            delegate: RowLayout {
+                                required property var modelData
+                                width: historyView.width - 8
+                                spacing: 6
+                                Text {
+                                    text: root.clockText(modelData.t)
+                                    color: root.theme.overlay
+                                    font.pixelSize: 9
+                                    font.family: "JetBrains Mono, monospace"
+                                    Layout.preferredWidth: 30
+                                }
+                                SourceLogo { kind: modelData.agent || "hermes"; size: 12 }
+                                Text {
+                                    visible: !!modelData.project
+                                    text: modelData.project
+                                    color: root.theme.textDim; font.pixelSize: 9; font.bold: true
+                                    elide: Text.ElideRight
+                                    Layout.maximumWidth: 80
+                                }
+                                Text {
+                                    text: root.activityLabel(modelData.kind)
+                                    color: root.activityColor(modelData.kind)
+                                    font.pixelSize: 9; font.bold: true
+                                }
+                                Text {
+                                    text: modelData.text
+                                    color: root.theme.subtext1
+                                    font.pixelSize: 9
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    visible: !!modelData.dur
+                                    text: "⏱ " + modelData.dur
+                                    color: root.theme.subtext0; font.pixelSize: 8
+                                }
+                            }
+                        }
                     }
                 }
 
