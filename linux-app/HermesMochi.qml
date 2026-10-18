@@ -324,6 +324,13 @@ PanelWindow {
         function sound(on: bool): void {
             settings.sound = on;
         }
+        // Coba ekspresi Mochi; "" kembali otomatis (CPU / musik / jam).
+        function mood(name: string): string {
+            let names = ["", "sleepy", "sweat", "dance", "happy", "celebrate", "dizzy", "angry", "working", "wave"];
+            if (names.indexOf(name) < 0) return "ekspresi tidak dikenal (" + names.slice(1).join(", ") + ")";
+            root.moodOverride = name;
+            return "ok";
+        }
         function autosafe(on: bool): void {
             settings.autoSafe = on;
         }
@@ -516,6 +523,31 @@ PanelWindow {
     property string mediaArtist: "Buka Spotify / Musik"
     property string mediaArtUrl: ""
     property string mediaSource: "Spotify"
+
+    // Suasana Mochi saat santai: keringat bila CPU >= 90%, joget saat musik
+    // diputar, mengantuk larut malam (23.00-05.00). "" = ekspresi biasa.
+    property string moodOverride: ""          // dari 'qbot mood', untuk mencoba ekspresi
+    readonly property string ambientExpression: {
+        if (moodOverride) return moodOverride;
+        if (sysCpu >= 90) return "sweat";
+        if (mediaPlaying) return "dance";
+        let h = parseInt(currentTimeHoursMins, 10);
+        if (h >= 23 || h < 5) return "sleepy";
+        return "";
+    }
+
+    // Data untuk suasana saat island tertutup (saat terbuka, tab-nya sendiri yang polling).
+    Timer {
+        interval: 15000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            if (root.islandExpanded) return;
+            fetchSysInfoProcess.running = true;
+            fetchMediaProcess.running = true;
+        }
+    }
 
     // Realtime Clock State
     property string currentTimeHoursMins: "00:00"
@@ -1759,7 +1791,8 @@ PanelWindow {
                     size: 32
                     anchors.verticalCenter: parent.verticalCenter
                     avatarType: root.avatarModel
-                    expression: root.avatarExpression !== "proud" ? root.avatarExpression : (capsuleHover.hovered ? "wave" : (root.hermesWorking ? "working" : "idle"))
+                    expression: root.avatarExpression !== "proud" ? root.avatarExpression
+                                : (capsuleHover.hovered ? "wave" : (root.hermesWorking ? "working" : (root.ambientExpression || "idle")))
                     targetLookX: root.cursorLookX
                     targetLookY: root.cursorLookY
                 }
@@ -2505,7 +2538,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 size: 66
                                 avatarType: root.avatarModel
-                                expression: root.isDizzy ? "dizzy" : (root.isAngry ? "angry" : (root.hermesWorking ? "working" : "proud"))
+                                expression: root.isDizzy ? "dizzy" : (root.isAngry ? "angry" : (root.hermesWorking ? "working" : (root.ambientExpression || "proud")))
                                 targetLookX: root.cursorLookX
                                 targetLookY: root.cursorLookY
                             }

@@ -5,7 +5,7 @@ Item {
 
     property int size: 28
     property string avatarType: "strobi" // "strobi" | "grok" | "citrus" | "nova" | "kirby" | "freddy"
-    property string expression: "proud"  // "neutral" | "proud" | "happy" | "working" | "celebrate" | "idle" | "angry" | "dizzy" | "wave" | "task_start"
+    property string expression: "proud"  // "neutral" | "proud" | "happy" | "working" | "celebrate" | "idle" | "angry" | "dizzy" | "wave" | "task_start" | "sleepy" | "sweat" | "dance"
 
     // Eye Tracking Target Offset (-1.0 .. 1.0)
     property real targetLookX: 0.0
@@ -48,6 +48,8 @@ Item {
         if (expression === "celebrate") return -8.0;
         if (expression === "working") return -8.0;
         if (expression === "angry") return 0.0;
+        if (expression === "sleepy") return 10.0;
+        if (expression === "sweat") return -4.0;
         return 0.0;
     }
     Behavior on headTiltZ { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
@@ -55,7 +57,7 @@ Item {
     // Blink Interval acak (hanya saat normal)
     Timer {
         interval: 3000 + Math.random() * 2000
-        running: expression !== "angry" && expression !== "celebrate" && expression !== "dizzy"
+        running: expression !== "angry" && expression !== "celebrate" && expression !== "dizzy" && expression !== "sleepy"
         repeat: true
         onTriggered: {
             avatarRoot.isBlinking = true;
@@ -74,6 +76,30 @@ Item {
     Item {
         id: bodyContainer
         anchors.fill: parent
+
+        // Goyang (dance) dan napas (sleepy) lewat transform terpisah, karena
+        // properti rotation/scale sudah dipakai animasi wave, dizzy, dan task_start.
+        transform: [
+            Rotation { id: swayRot; origin.x: avatarRoot.size / 2; origin.y: avatarRoot.size; angle: 0 },
+            Scale { id: breathScale; origin.x: avatarRoot.size / 2; origin.y: avatarRoot.size; xScale: 1; yScale: 1 }
+        ]
+
+        SequentialAnimation {
+            running: avatarRoot.expression === "dance"
+            loops: Animation.Infinite
+            onRunningChanged: if (!running) swayRot.angle = 0
+            NumberAnimation { target: swayRot; property: "angle"; to: -11; duration: 260; easing.type: Easing.InOutSine }
+            NumberAnimation { target: swayRot; property: "angle"; to: 11; duration: 520; easing.type: Easing.InOutSine }
+            NumberAnimation { target: swayRot; property: "angle"; to: 0; duration: 260; easing.type: Easing.InOutSine }
+        }
+
+        SequentialAnimation {
+            running: avatarRoot.expression === "sleepy"
+            loops: Animation.Infinite
+            onRunningChanged: if (!running) breathScale.yScale = 1
+            NumberAnimation { target: breathScale; property: "yScale"; to: 0.93; duration: 1400; easing.type: Easing.InOutSine }
+            NumberAnimation { target: breathScale; property: "yScale"; to: 1.0; duration: 1400; easing.type: Easing.InOutSine }
+        }
 
         // Efek melambai & bergoyang senang saat menyapa (Wave / Welcome)
         SequentialAnimation on rotation {
@@ -193,6 +219,7 @@ Item {
                 // Dimensi Mata
                 readonly property real eyeWidth: avatarRoot.size * 0.16
                 readonly property real eyeHeight: {
+                    if (expression === "sleepy") return Math.max(2.2, avatarRoot.size * 0.05);
                     if (avatarRoot.isBlinking && expression !== "angry" && expression !== "celebrate" && expression !== "dizzy") return 2.2;
                     if (expression === "celebrate") return avatarRoot.size * 0.22;
                     if (expression === "proud") return avatarRoot.size * 0.32;
@@ -218,7 +245,8 @@ Item {
                         rotation: {
                             if (expression === "proud") return -12;
                             if (expression === "working") return -18;
-                            if (expression === "happy") return 15;
+                            if (expression === "happy" || expression === "dance") return 15;
+                            if (expression === "sweat") return 10;
                             return 0;
                         }
                         Behavior on rotation { NumberAnimation { duration: 250 } }
@@ -315,7 +343,8 @@ Item {
                         rotation: {
                             if (expression === "proud") return 12;
                             if (expression === "working") return 18;
-                            if (expression === "happy") return -15;
+                            if (expression === "happy" || expression === "dance") return -15;
+                            if (expression === "sweat") return -10;
                             return 0;
                         }
                         Behavior on rotation { NumberAnimation { duration: 250 } }
@@ -393,6 +422,63 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // "z" melayang saat mengantuk (dua huruf, bergantian)
+    Repeater {
+        model: avatarRoot.expression === "sleepy" ? 2 : 0
+        Text {
+            id: zText
+            required property int index
+            text: "z"
+            color: "#c7d2fe"
+            font.pixelSize: Math.max(7, avatarRoot.size * (0.26 + index * 0.08))
+            font.bold: true
+            x: avatarRoot.size * (0.8 + index * 0.12)
+            opacity: 0
+            SequentialAnimation {
+                running: true
+                loops: Animation.Infinite
+                PauseAnimation { duration: zText.index * 900 }
+                ParallelAnimation {
+                    NumberAnimation { target: zText; property: "y"; from: avatarRoot.size * 0.15; to: -avatarRoot.size * 0.35; duration: 1800; easing.type: Easing.OutSine }
+                    SequentialAnimation {
+                        NumberAnimation { target: zText; property: "opacity"; from: 0; to: 1; duration: 500 }
+                        NumberAnimation { target: zText; property: "opacity"; to: 0; duration: 1300 }
+                    }
+                }
+                PauseAnimation { duration: (1 - zText.index) * 900 }
+            }
+        }
+    }
+
+    // Tetes keringat saat sistem kepanasan (CPU tinggi)
+    Canvas {
+        id: sweatDrop
+        visible: avatarRoot.expression === "sweat"
+        width: Math.max(5, avatarRoot.size * 0.16)
+        height: width * 1.4
+        x: avatarRoot.size * 0.8
+        y: avatarRoot.size * 0.05
+        onPaint: {
+            let ctx = getContext("2d");
+            ctx.reset();
+            ctx.fillStyle = "#7dd3fc";
+            ctx.beginPath();
+            ctx.moveTo(width / 2, 0);
+            ctx.quadraticCurveTo(width, height * 0.6, width / 2, height);
+            ctx.quadraticCurveTo(0, height * 0.6, width / 2, 0);
+            ctx.fill();
+        }
+        SequentialAnimation {
+            running: sweatDrop.visible
+            loops: Animation.Infinite
+            ParallelAnimation {
+                NumberAnimation { target: sweatDrop; property: "y"; from: avatarRoot.size * 0.02; to: avatarRoot.size * 0.42; duration: 1100; easing.type: Easing.InQuad }
+                NumberAnimation { target: sweatDrop; property: "opacity"; from: 1; to: 0; duration: 1100; easing.type: Easing.InQuad }
+            }
+            PauseAnimation { duration: 400 }
         }
     }
 }

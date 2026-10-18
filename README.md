@@ -28,6 +28,7 @@ backend integrasi **Hermes Agent**.
 - **Interview Assist** — transkrip lokal (faster-whisper) + saran jawaban dari LLM.
 - **Efek suara** — bunyi saat izin masuk, task selesai, atau gagal (Sistem → Tools untuk mematikan).
 - **Sapaan harian** — sekali per hari Mochi menyapa sesuai jam dengan ringkasan hari aktif terakhir.
+- **Mochi punya suasana** — berkeringat saat CPU ≥ 90%, berjoget saat musik diputar, mengantuk pukul 23.00–05.00.
 - **5 tema** — Zinc, Catppuccin, Tokyo Night, Gruvbox, Nord (tombol ◐ di panel kiri).
 - **Panel 4 grup** — Agent (Hermes + sesi coding), Kerja (Projects, Dev Server),
   Sistem (CPU/RAM, 9Router, Tools), Catatan; plus mode Interview.
@@ -94,6 +95,8 @@ qs -p $QBOT ipc call qbot tab status    # buka langsung ke tab tertentu
 # tab: agent, projects, dev, status, usage, tools, notes, interview
 qs -p $QBOT ipc call qbot theme nord     # zinc, catppuccin, tokyonight, gruvbox, nord
 qs -p $QBOT ipc call qbot sound false    # matikan efek suara
+qs -p $QBOT ipc call qbot mood dance     # coba ekspresi (sleepy, sweat, dance, …); "" = otomatis
+qs -p $QBOT ipc call qbot status         # state QBot sebagai JSON
 ```
 
 Contoh keybind Niri (`~/.config/niri/config.kdl`, di dalam `binds { }`):
