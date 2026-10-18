@@ -95,7 +95,30 @@ PanelWindow {
             id: settings
             property string avatar: "white"
             property string tab: "notes"
+            property string theme: "zinc"
         }
+    }
+
+    // Palet netral + aksen. Warna status (hijau selesai, merah gagal, oranye
+    // butuh izin) sengaja sama di semua tema supaya maknanya tetap terbaca.
+    readonly property var themePresets: ({
+        zinc:       {label: "Zinc", base: "#0a0a0c", mantle: "#121215", surface0: "#18181b", surface1: "#27272a", surface2: "#3f3f46",
+                     overlay: "#52525b", subtext0: "#71717a", subtext1: "#a1a1aa", textDim: "#d4d4d8", text: "#f4f4f5", accent: "#38bdf8"},
+        catppuccin: {label: "Catppuccin", base: "#11111b", mantle: "#181825", surface0: "#1e1e2e", surface1: "#313244", surface2: "#45475a",
+                     overlay: "#585b70", subtext0: "#7f849c", subtext1: "#a6adc8", textDim: "#bac2de", text: "#cdd6f4", accent: "#cba6f7"},
+        tokyonight: {label: "Tokyo Night", base: "#16161e", mantle: "#1a1b26", surface0: "#1f2335", surface1: "#292e42", surface2: "#3b4261",
+                     overlay: "#545c7e", subtext0: "#737aa2", subtext1: "#9aa5ce", textDim: "#a9b1d6", text: "#c0caf5", accent: "#7aa2f7"},
+        gruvbox:    {label: "Gruvbox", base: "#1d2021", mantle: "#282828", surface0: "#32302f", surface1: "#3c3836", surface2: "#504945",
+                     overlay: "#665c54", subtext0: "#928374", subtext1: "#a89984", textDim: "#d5c4a1", text: "#ebdbb2", accent: "#fabd2f"},
+        nord:       {label: "Nord", base: "#242933", mantle: "#2e3440", surface0: "#3b4252", surface1: "#434c5e", surface2: "#4c566a",
+                     overlay: "#616e88", subtext0: "#7b88a1", subtext1: "#a3b1c9", textDim: "#d8dee9", text: "#eceff4", accent: "#88c0d0"}
+    })
+    readonly property var themeNames: ["zinc", "catppuccin", "tokyonight", "gruvbox", "nord"]
+    readonly property var theme: themePresets[settings.theme] || themePresets.zinc
+
+    function cycleTheme() {
+        let i = themeNames.indexOf(settings.theme);
+        settings.theme = themeNames[(i + 1) % themeNames.length];
     }
 
     Timer {
@@ -130,6 +153,11 @@ PanelWindow {
             if (root.tabKeys.indexOf(name) < 0) return "tab tidak dikenal: " + name + " (" + root.tabKeys.join(", ") + ")";
             open();
             root.selectTab(name);
+            return "ok";
+        }
+        function theme(name: string): string {
+            if (!root.themePresets[name]) return "tema tidak dikenal: " + name + " (" + root.themeNames.join(", ") + ")";
+            settings.theme = name;
             return "ok";
         }
     }
@@ -412,7 +440,7 @@ PanelWindow {
 
     function sourceColor(agent) {
         if (agent === "claude") return "#d97757";
-        if (agent === "opencode") return "#e4e4e7";
+        if (agent === "opencode") return root.theme.textDim;
         return "#c4b5fd";
     }
 
@@ -421,7 +449,7 @@ PanelWindow {
         if (state === "working") return "#38bdf8";
         if (state === "done") return "#22c55e";
         if (state === "error") return "#ef4444";
-        return "#71717a";
+        return root.theme.subtext0;
     }
 
     function stateLabel(state) {
@@ -1392,13 +1420,13 @@ PanelWindow {
         bottomLeftRadius: (root.islandExpanded && !root.isNotifying) ? 26 : 22
         bottomRightRadius: (root.islandExpanded && !root.isNotifying) ? 26 : 22
 
-        color: "#0a0a0c"
+        color: root.theme.base
         border.color: {
             if (root.notifyType === "approval") return "#f59e0b";
             if (root.notifyType === "request") return root.statusColor;
             if (root.notifyType === "agent_wait") return "#f97316";
             if (root.isNotifying && !root.islandExpanded) return Qt.darker(root.statusColor, 2.2);
-            return "#27272a";
+            return root.theme.surface1;
         }
         Behavior on border.color { ColorAnimation { duration: 250 } }
         border.width: (root.notifyType === "approval") ? 1.5 : 1.0
@@ -1665,13 +1693,13 @@ PanelWindow {
                             implicitWidth: projChipTxt.implicitWidth + 10
                             implicitHeight: 15
                             radius: 4
-                            color: "#18181b"
-                            border.color: "#27272a"
+                            color: root.theme.surface0
+                            border.color: root.theme.surface1
                             Text {
                                 id: projChipTxt
                                 anchors.centerIn: parent
                                 text: "▸ " + root.notifyProject
-                                color: "#a1a1aa"
+                                color: root.theme.subtext1
                                 font.pixelSize: 8
                                 font.bold: true
                                 font.family: "JetBrains Mono, monospace"
@@ -1684,7 +1712,7 @@ PanelWindow {
                     Text {
                         Layout.fillWidth: true
                         text: root.activeDetail
-                        color: "#d4d4d8"
+                        color: root.theme.textDim
                         font.pixelSize: 10
                         // Command approval / kalimat inti jawaban interview: sampai 2 baris.
                         readonly property bool twoLines: root.notifyType === "approval" || root.notifyType === "interview"
@@ -1756,7 +1784,7 @@ PanelWindow {
                             visible: root.notifyDuration !== ""
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "⏱ " + root.notifyDuration
-                            color: "#71717a"
+                            color: root.theme.subtext0
                             font.pixelSize: 8
                             font.bold: true
                         }
@@ -1909,12 +1937,12 @@ PanelWindow {
                             Rectangle {
                                 visible: root.notifyProject !== ""
                                 implicitWidth: reqProjTxt.implicitWidth + 10; implicitHeight: 15; radius: 4
-                                color: "#18181b"; border.color: "#27272a"
+                                color: root.theme.surface0; border.color: root.theme.surface1
                                 Text {
                                     id: reqProjTxt
                                     anchors.centerIn: parent
                                     text: "▸ " + root.notifyProject
-                                    color: "#a1a1aa"
+                                    color: root.theme.subtext1
                                     font.pixelSize: 8; font.bold: true; font.family: "JetBrains Mono, monospace"
                                 }
                             }
@@ -1947,12 +1975,12 @@ PanelWindow {
                         visible: root.agentRequests.length > 1
                         Layout.alignment: Qt.AlignTop
                         implicitWidth: queueTxt.implicitWidth + 12; implicitHeight: 18; radius: 9
-                        color: "#27272a"
+                        color: root.theme.surface1
                         Text {
                             id: queueTxt
                             anchors.centerIn: parent
                             text: "1/" + root.agentRequests.length + " antrean"
-                            color: "#d4d4d8"; font.pixelSize: 9; font.bold: true
+                            color: root.theme.textDim; font.pixelSize: 9; font.bold: true
                         }
                     }
                 }
@@ -1963,14 +1991,14 @@ PanelWindow {
                     Layout.fillWidth: true
                     implicitHeight: permDetail.implicitHeight + 16
                     radius: 8
-                    color: "#111114"
-                    border.color: "#27272a"
+                    color: root.theme.mantle
+                    border.color: root.theme.surface1
                     Text {
                         id: permDetail
                         anchors.fill: parent
                         anchors.margins: 8
                         text: requestCard.req ? (requestCard.req.detail || "-") : ""
-                        color: "#e4e4e7"
+                        color: root.theme.textDim
                         font.pixelSize: 11
                         font.family: "JetBrains Mono, monospace"
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -1984,7 +2012,7 @@ PanelWindow {
                     visible: requestCard.question !== null
                     Layout.fillWidth: true
                     text: requestCard.question ? requestCard.question.question : ""
-                    color: "#f4f4f5"
+                    color: root.theme.text
                     font.pixelSize: 12
                     font.bold: true
                     wrapMode: Text.WordWrap
@@ -2015,8 +2043,8 @@ PanelWindow {
                                 width: optionCol.width
                                 height: optionText.implicitHeight + 14
                                 radius: 7
-                                color: chosen ? "#0c4a6e" : (optionHover.containsMouse ? "#1f1f24" : "#16161a")
-                                border.color: chosen ? "#38bdf8" : (optionHover.containsMouse ? "#3f3f46" : "#27272a")
+                                color: chosen ? "#0c4a6e" : (optionHover.containsMouse ? root.theme.surface0 : root.theme.surface0)
+                                border.color: chosen ? root.theme.accent : (optionHover.containsMouse ? root.theme.surface2 : root.theme.surface1)
                                 Behavior on color { ColorAnimation { duration: 120 } }
 
                                 Row {
@@ -2033,12 +2061,12 @@ PanelWindow {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 18; height: 18
                                         radius: requestCard.question && requestCard.question.multiSelect ? 4 : 9
-                                        color: optionRow.chosen ? "#38bdf8" : "transparent"
-                                        border.color: optionRow.chosen ? "#38bdf8" : "#52525b"
+                                        color: optionRow.chosen ? root.theme.accent : "transparent"
+                                        border.color: optionRow.chosen ? root.theme.accent : root.theme.overlay
                                         Text {
                                             anchors.centerIn: parent
                                             text: optionRow.chosen ? "✓" : (optionRow.index + 1)
-                                            color: optionRow.chosen ? "#082f49" : "#a1a1aa"
+                                            color: optionRow.chosen ? "#082f49" : root.theme.subtext1
                                             font.pixelSize: 9; font.bold: true
                                         }
                                     }
@@ -2049,7 +2077,7 @@ PanelWindow {
                                         Text {
                                             width: parent.width
                                             text: optionRow.modelData.label
-                                            color: "#f4f4f5"
+                                            color: root.theme.text
                                             font.pixelSize: 11; font.bold: true
                                             elide: Text.ElideRight
                                         }
@@ -2057,7 +2085,7 @@ PanelWindow {
                                             visible: text !== ""
                                             width: parent.width
                                             text: optionRow.modelData.description || ""
-                                            color: "#a1a1aa"
+                                            color: root.theme.subtext1
                                             font.pixelSize: 9
                                             wrapMode: Text.WordWrap
                                             maximumLineCount: 2
@@ -2085,8 +2113,8 @@ PanelWindow {
                     Layout.fillWidth: true
                     implicitHeight: 30
                     radius: 7
-                    color: "#16161a"
-                    border.color: requestCustomInput.activeFocus ? "#38bdf8" : "#27272a"
+                    color: root.theme.surface0
+                    border.color: requestCustomInput.activeFocus ? root.theme.accent : root.theme.surface1
                     TextField {
                         id: requestCustomInput
                         anchors.fill: parent
@@ -2094,7 +2122,7 @@ PanelWindow {
                         anchors.rightMargin: 8
                         verticalAlignment: TextInput.AlignVCenter
                         placeholderText: "Jawaban lain… (Enter untuk kirim)"
-                        placeholderTextColor: "#71717a"
+                        placeholderTextColor: root.theme.subtext0
                         color: "#ffffff"
                         font.pixelSize: 11
                         background: null
@@ -2119,7 +2147,7 @@ PanelWindow {
 
                     Text {
                         text: "Jawab di terminal"
-                        color: termLink.containsMouse ? "#e4e4e7" : "#71717a"
+                        color: termLink.containsMouse ? root.theme.textDim : root.theme.subtext0
                         font.pixelSize: 10
                         font.underline: termLink.containsMouse
                         MouseArea {
@@ -2137,14 +2165,14 @@ PanelWindow {
                         text: requestCard.isPerm
                               ? "⌨ Y izinkan · N tolak" + (requestCard.req && requestCard.req.can_always ? " · A selalu" : "") + " · T terminal"
                               : "⌨ 1-9 pilih · Enter lanjut · T terminal"
-                        color: "#52525b"
+                        color: root.theme.overlay
                         font.pixelSize: 9
                     }
 
                     Text {
                         visible: root.reqSending
                         text: "Mengirim…"
-                        color: "#38bdf8"
+                        color: root.theme.accent
                         font.pixelSize: 10
                     }
 
@@ -2188,9 +2216,9 @@ PanelWindow {
                     Rectangle {
                         visible: requestCard.question !== null && root.reqIndex > 0
                         implicitWidth: backTxt.implicitWidth + 20; implicitHeight: 28; radius: 7
-                        color: backHover.containsMouse ? "#27272a" : "#18181b"
-                        border.color: "#3f3f46"
-                        Text { id: backTxt; anchors.centerIn: parent; text: "Kembali"; color: "#d4d4d8"; font.pixelSize: 11; font.bold: true }
+                        color: backHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                        border.color: root.theme.surface2
+                        Text { id: backTxt; anchors.centerIn: parent; text: "Kembali"; color: root.theme.textDim; font.pixelSize: 11; font.bold: true }
                         MouseArea {
                             id: backHover
                             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -2206,13 +2234,13 @@ PanelWindow {
                         visible: requestCard.question !== null && (requestCard.question.multiSelect || requestCustomInput.text.trim().length > 0
                                                                    || requestCard.question.options.length === 0 || (requestCard.picked.length > 0 && !nextBtn.last))
                         implicitWidth: nextTxt.implicitWidth + 22; implicitHeight: 28; radius: 7
-                        color: ready ? (nextHover.containsMouse ? "#0ea5e9" : "#0284c7") : "#18181b"
-                        border.color: ready ? "#7dd3fc" : "#27272a"
+                        color: ready ? (nextHover.containsMouse ? "#0ea5e9" : "#0284c7") : root.theme.surface0
+                        border.color: ready ? "#7dd3fc" : root.theme.surface1
                         Text {
                             id: nextTxt
                             anchors.centerIn: parent
                             text: nextBtn.last ? "Kirim" : "Lanjut"
-                            color: nextBtn.ready ? "#f0f9ff" : "#52525b"
+                            color: nextBtn.ready ? "#f0f9ff" : root.theme.overlay
                             font.pixelSize: 11; font.bold: true
                         }
                         MouseArea {
@@ -2236,8 +2264,8 @@ PanelWindow {
                     Layout.preferredWidth: 168
                     Layout.fillHeight: true
                     radius: 14
-                    color: "#121215"
-                    border.color: "#27272a"
+                    color: root.theme.mantle
+                    border.color: root.theme.surface1
                     clip: true
 
                     ColumnLayout {
@@ -2333,8 +2361,8 @@ PanelWindow {
                             Layout.fillWidth: true
                             implicitHeight: spotifyCol.implicitHeight + 20
                             radius: 10
-                            color: "#18181b"
-                            border.color: root.mediaPlaying ? "#1db954" : "#27272a"
+                            color: root.theme.surface0
+                            border.color: root.mediaPlaying ? "#1db954" : root.theme.surface1
                             border.width: 1
 
                             Behavior on border.color { ColorAnimation { duration: 250 } }
@@ -2359,7 +2387,7 @@ PanelWindow {
 
                                     Text {
                                         text: root.mediaSource
-                                        color: root.mediaPlaying ? "#1db954" : "#a1a1aa"
+                                        color: root.mediaPlaying ? "#1db954" : root.theme.subtext1
                                         font.pixelSize: 9
                                         font.bold: true
                                         font.family: "Inter, sans-serif"
@@ -2384,7 +2412,7 @@ PanelWindow {
                                                 width: 2.5
                                                 height: root.mediaPlaying ? 8 : 3
                                                 radius: 1
-                                                color: root.mediaPlaying ? "#1db954" : "#52525b"
+                                                color: root.mediaPlaying ? "#1db954" : root.theme.overlay
                                                 anchors.bottom: parent.bottom
 
                                                 SequentialAnimation on height {
@@ -2408,7 +2436,7 @@ PanelWindow {
                                         Layout.preferredWidth: 42
                                         Layout.preferredHeight: 42
                                         radius: 7
-                                        color: "#27272a"
+                                        color: root.theme.surface1
                                         clip: true
 
                                         Image {
@@ -2439,7 +2467,7 @@ PanelWindow {
 
                                         Text {
                                             text: root.mediaTitle
-                                            color: "#f4f4f5"
+                                            color: root.theme.text
                                             font.pixelSize: 10
                                             font.bold: true
                                             font.family: "Inter, sans-serif"
@@ -2449,7 +2477,7 @@ PanelWindow {
 
                                         Text {
                                             text: root.mediaArtist
-                                            color: "#71717a"
+                                            color: root.theme.subtext0
                                             font.pixelSize: 9
                                             font.family: "Inter, sans-serif"
                                             elide: Text.ElideRight
@@ -2467,11 +2495,11 @@ PanelWindow {
                                     // Tombol Prev
                                     Rectangle {
                                         width: 28; height: 28; radius: 14
-                                        color: prevMediaHover.containsMouse ? "#27272a" : "transparent"
+                                        color: prevMediaHover.containsMouse ? root.theme.surface1 : "transparent"
                                         Text {
                                             anchors.centerIn: parent
                                             text: "⏮"
-                                            color: "#a1a1aa"
+                                            color: root.theme.subtext1
                                             font.pixelSize: 13
                                         }
                                         MouseArea {
@@ -2507,11 +2535,11 @@ PanelWindow {
                                     // Tombol Next
                                     Rectangle {
                                         width: 28; height: 28; radius: 14
-                                        color: nextMediaHover.containsMouse ? "#27272a" : "transparent"
+                                        color: nextMediaHover.containsMouse ? root.theme.surface1 : "transparent"
                                         Text {
                                             anchors.centerIn: parent
                                             text: "⏭"
-                                            color: "#a1a1aa"
+                                            color: root.theme.subtext1
                                             font.pixelSize: 13
                                         }
                                         MouseArea {
@@ -2532,8 +2560,8 @@ PanelWindow {
                             Layout.fillWidth: true
                             implicitHeight: 52
                             radius: 8
-                            color: "#18181b"
-                            border.color: "#27272a"
+                            color: root.theme.surface0
+                            border.color: root.theme.surface1
                             border.width: 1
 
                             ColumnLayout {
@@ -2556,7 +2584,7 @@ PanelWindow {
 
                                     Text {
                                         text: ":" + root.currentTimeSecs
-                                        color: "#38bdf8"
+                                        color: root.theme.accent
                                         font.pixelSize: 12
                                         font.bold: true
                                         font.family: "JetBrains Mono, Inter, monospace"
@@ -2565,7 +2593,7 @@ PanelWindow {
                                     // Badge Mini WIB
                                     Rectangle {
                                         width: 24; height: 13; radius: 3
-                                        color: "#27272a"
+                                        color: root.theme.surface1
                                         Layout.alignment: Qt.AlignVCenter
                                         Text {
                                             anchors.centerIn: parent
@@ -2581,7 +2609,7 @@ PanelWindow {
                                 Text {
                                     Layout.alignment: Qt.AlignHCenter
                                     text: root.currentDateStr
-                                    color: "#a1a1aa"
+                                    color: root.theme.subtext1
                                     font.pixelSize: 9
                                     font.family: "Inter, sans-serif"
                                 }
@@ -2605,15 +2633,39 @@ PanelWindow {
                                         if (modelData === "nova") return "#55b6c3";
                                         if (modelData === "citrus") return "#ffcf24";
                                         if (modelData === "kirby") return "#ffb6e0";
-                                        return "#a1a1aa";
+                                        return root.theme.subtext1;
                                     }
-                                    border.color: root.avatarModel === modelData ? "#38bdf8" : "#3f3f46"
+                                    border.color: root.avatarModel === modelData ? root.theme.accent : root.theme.surface2
                                     border.width: 1.5
 
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: settings.avatar = modelData
+                                    }
+                                }
+                            }
+
+                            Rectangle { width: 1; height: 12; color: root.theme.surface2; anchors.verticalCenter: parent.verticalCenter }
+
+                            // Ganti tema: lingkaran berwarna aksen tema aktif, klik = tema berikutnya.
+                            Rectangle {
+                                width: 16; height: 16; radius: 8
+                                color: root.theme.surface1
+                                border.color: root.theme.accent
+                                border.width: 1.5
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "◐"
+                                    color: root.theme.accent
+                                    font.pixelSize: 10
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.cycleTheme();
+                                        root.showActionToast(true, "Tema: " + root.theme.label);
                                     }
                                 }
                             }
@@ -2642,12 +2694,12 @@ PanelWindow {
                                 implicitWidth: groupTxt.implicitWidth + 14
                                 implicitHeight: 26
                                 radius: 6
-                                color: active ? "#27272a" : (groupHover.containsMouse ? "#18181b" : "transparent")
+                                color: active ? root.theme.surface1 : (groupHover.containsMouse ? root.theme.surface0 : "transparent")
                                 Text {
                                     id: groupTxt
                                     anchors.centerIn: parent
                                     text: groupBtn.modelData.label
-                                    color: groupBtn.active ? "#fff" : "#71717a"
+                                    color: groupBtn.active ? "#fff" : root.theme.subtext0
                                     font.pixelSize: 11; font.bold: true
                                 }
                                 MouseArea {
@@ -2661,7 +2713,7 @@ PanelWindow {
                         Rectangle {
                             visible: root.subTabs.length > 1
                             implicitWidth: 1; implicitHeight: 14
-                            color: "#3f3f46"
+                            color: root.theme.surface2
                             Layout.leftMargin: 2; Layout.rightMargin: 2
                         }
 
@@ -2674,13 +2726,13 @@ PanelWindow {
                                 implicitWidth: subTxt.implicitWidth + 14
                                 implicitHeight: 20
                                 radius: 10
-                                color: active ? "#0c4a6e" : "transparent"
-                                border.color: active ? "#0369a1" : "#27272a"
+                                color: active ? Qt.darker(root.theme.accent, 2.8) : "transparent"
+                                border.color: active ? Qt.darker(root.theme.accent, 1.6) : root.theme.surface1
                                 Text {
                                     id: subTxt
                                     anchors.centerIn: parent
                                     text: subBtn.modelData.label
-                                    color: subBtn.active ? "#e0f2fe" : "#71717a"
+                                    color: subBtn.active ? root.theme.text : root.theme.subtext0
                                     font.pixelSize: 9; font.bold: true
                                 }
                                 MouseArea {
@@ -2699,7 +2751,7 @@ PanelWindow {
                             implicitWidth: ivNavRow.implicitWidth + 14
                             implicitHeight: 26
                             radius: 6
-                            color: active ? "#27272a" : (ivNavHover.containsMouse ? "#18181b" : "transparent")
+                            color: active ? root.theme.surface1 : (ivNavHover.containsMouse ? root.theme.surface0 : "transparent")
                             border.color: root.interviewRunning ? "#ef4444" : "transparent"
                             Row {
                                 id: ivNavRow
@@ -2711,7 +2763,7 @@ PanelWindow {
                                     width: 6; height: 6; radius: 3
                                     color: "#ef4444"
                                 }
-                                Text { text: "Interview"; color: ivNavBtn.active ? "#fff" : "#71717a"; font.pixelSize: 10; font.bold: true }
+                                Text { text: "Interview"; color: ivNavBtn.active ? "#fff" : root.theme.subtext0; font.pixelSize: 10; font.bold: true }
                             }
                             MouseArea {
                                 id: ivNavHover
@@ -2762,15 +2814,15 @@ PanelWindow {
                                     id: filterChipRect
                                     width: filterChipTxt.implicitWidth + 16
                                     height: 24; radius: 6
-                                    color: notesTabCol.filterTag === modelData.key ? "#27272a" : "#18181b"
-                                    border.color: notesTabCol.filterTag === modelData.key ? "#3f3f46" : "#27272a"
+                                    color: notesTabCol.filterTag === modelData.key ? root.theme.surface1 : root.theme.surface0
+                                    border.color: notesTabCol.filterTag === modelData.key ? root.theme.surface2 : root.theme.surface1
                                     border.width: 1
 
                                     Text {
                                         id: filterChipTxt
                                         anchors.centerIn: parent
                                         text: modelData.label
-                                        color: notesTabCol.filterTag === modelData.key ? "#ffffff" : "#71717a"
+                                        color: notesTabCol.filterTag === modelData.key ? "#ffffff" : root.theme.subtext0
                                         font.pixelSize: 10
                                         font.bold: notesTabCol.filterTag === modelData.key
                                     }
@@ -2796,14 +2848,14 @@ PanelWindow {
                         Rectangle {
                             visible: notesModel.count > 0
                             width: 76; height: 24; radius: 6
-                            color: notesTabCol.confirmClear ? "#450a0a" : (clearAllHover.containsMouse ? "#27272a" : "#18181b")
-                            border.color: notesTabCol.confirmClear ? "#ef4444" : "#27272a"
+                            color: notesTabCol.confirmClear ? "#450a0a" : (clearAllHover.containsMouse ? root.theme.surface1 : root.theme.surface0)
+                            border.color: notesTabCol.confirmClear ? "#ef4444" : root.theme.surface1
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: notesTabCol.confirmClear ? "Yakin hapus?" : "Hapus Semua"
-                                color: notesTabCol.confirmClear ? "#fca5a5" : (clearAllHover.containsMouse ? "#ffffff" : "#71717a")
+                                color: notesTabCol.confirmClear ? "#fca5a5" : (clearAllHover.containsMouse ? "#ffffff" : root.theme.subtext0)
                                 font.pixelSize: 9
                                 font.bold: true
                             }
@@ -2840,8 +2892,8 @@ PanelWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 8
-                        color: "#121215"
-                        border.color: "#27272a"
+                        color: root.theme.mantle
+                        border.color: root.theme.surface1
                         border.width: 1
 
                         ListView {
@@ -2857,7 +2909,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: notesTabCol.visibleNoteCount === 0
                                 text: notesTabCol.filterTag === "cmd" ? "Belum ada perintah command" : (notesTabCol.filterTag === "task" ? "Belum ada task tersimpan" : (notesTabCol.filterTag === "note" ? "Belum ada memo tersimpan" : "Belum ada catatan tersimpan"))
-                                color: "#52525b"
+                                color: root.theme.overlay
                                 font.pixelSize: 11
                             }
 
@@ -2879,8 +2931,8 @@ PanelWindow {
                                 width: parent.width
                                 height: parent.height - 6
                                 radius: 6
-                                color: "#18181b"
-                                border.color: "#27272a"
+                                color: root.theme.surface0
+                                border.color: root.theme.surface1
                                 border.width: 1
 
                                 RowLayout {
@@ -2894,8 +2946,8 @@ PanelWindow {
                                     Rectangle {
                                         visible: !noteItemDelegate.isCmd
                                         width: 16; height: 16; radius: 4
-                                        color: model.done ? "#27272a" : "transparent"
-                                        border.color: model.done ? "#52525b" : "#3f3f46"
+                                        color: model.done ? root.theme.surface1 : "transparent"
+                                        border.color: model.done ? root.theme.overlay : root.theme.surface2
                                         border.width: 1
                                         Layout.alignment: Qt.AlignTop
                                         Layout.topMargin: 2
@@ -2928,8 +2980,8 @@ PanelWindow {
                                             Rectangle {
                                                 implicitWidth: tagLbl.implicitWidth + 8
                                                 height: 14; radius: 3
-                                                color: "#27272a"
-                                                border.color: "#3f3f46"
+                                                color: root.theme.surface1
+                                                border.color: root.theme.surface2
                                                 border.width: 1
 
                                                 Text {
@@ -2944,7 +2996,7 @@ PanelWindow {
 
                                             Text {
                                                 text: model.time || ""
-                                                color: "#71717a"
+                                                color: root.theme.subtext0
                                                 font.pixelSize: 9
                                             }
                                         }
@@ -2970,8 +3022,8 @@ PanelWindow {
                                         Rectangle {
                                             visible: noteItemDelegate.isCmd
                                             width: 22; height: 22; radius: 4
-                                            color: runBtnHover.containsMouse ? "#27272a" : "#1f1f23"
-                                            border.color: "#3f3f46"
+                                            color: runBtnHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                                            border.color: root.theme.surface2
                                             border.width: 1
 
                                             Text {
@@ -2995,7 +3047,7 @@ PanelWindow {
                                         Rectangle {
                                             id: copyBtn
                                             width: 22; height: 22; radius: 4
-                                            color: copyBtnHover.containsMouse ? "#27272a" : "transparent"
+                                            color: copyBtnHover.containsMouse ? root.theme.surface1 : "transparent"
                                             border.color: "transparent"
                                             property bool copiedRecently: false
 
@@ -3032,13 +3084,13 @@ PanelWindow {
                                         Rectangle {
                                             id: delBtn
                                             width: 22; height: 22; radius: 4
-                                            color: delBtnHover.containsMouse ? "#27272a" : "transparent"
+                                            color: delBtnHover.containsMouse ? root.theme.surface1 : "transparent"
                                             border.color: "transparent"
 
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "✕"
-                                                color: delBtnHover.containsMouse ? "#ef4444" : "#71717a"
+                                                color: delBtnHover.containsMouse ? "#ef4444" : root.theme.subtext0
                                                 font.pixelSize: 10
                                                 font.bold: true
                                             }
@@ -3079,8 +3131,8 @@ PanelWindow {
                                     Rectangle {
                                         width: tagRowLbl.implicitWidth + 14
                                         height: 22; radius: 4
-                                        color: notesTabCol.selectedTag === modelData.key ? "#27272a" : "#18181b"
-                                        border.color: notesTabCol.selectedTag === modelData.key ? "#3f3f46" : "#27272a"
+                                        color: notesTabCol.selectedTag === modelData.key ? root.theme.surface1 : root.theme.surface0
+                                        border.color: notesTabCol.selectedTag === modelData.key ? root.theme.surface2 : root.theme.surface1
                                         border.width: 1
 
                                         Text {
@@ -3110,8 +3162,8 @@ PanelWindow {
                                 Layout.fillWidth: true
                                 height: 32
                                 radius: 6
-                                color: "#18181b"
-                                border.color: noteInput.activeFocus ? "#3f3f46" : "#27272a"
+                                color: root.theme.surface0
+                                border.color: noteInput.activeFocus ? root.theme.surface2 : root.theme.surface1
                                 border.width: 1
 
                                 TextField {
@@ -3121,7 +3173,7 @@ PanelWindow {
                                     anchors.rightMargin: 8
                                     verticalAlignment: TextInput.AlignVCenter
                                     placeholderText: notesTabCol.selectedTag === "cmd" ? "Ketik perintah terminal..." : (notesTabCol.selectedTag === "task" ? "Tulis task kerjaan..." : "Tulis memo...")
-                                    placeholderTextColor: "#71717a"
+                                    placeholderTextColor: root.theme.subtext0
                                     color: "#ffffff"
                                     font.pixelSize: 11
                                     font.family: notesTabCol.selectedTag === "cmd" ? "JetBrains Mono, monospace" : "Inter, sans-serif"
@@ -3144,8 +3196,8 @@ PanelWindow {
                                 width: 68
                                 height: 32
                                 radius: 6
-                                color: saveBtnHover.containsMouse ? "#27272a" : "#202024"
-                                border.color: "#27272a"
+                                color: saveBtnHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                                border.color: root.theme.surface1
                                 border.width: 1
 
                                 Text {
@@ -3186,8 +3238,8 @@ PanelWindow {
                         Layout.fillWidth: true
                         implicitHeight: statusAgentCol.implicitHeight + 20
                         radius: 8
-                        color: "#18181b"
-                        border.color: "#27272a"
+                        color: root.theme.surface0
+                        border.color: root.theme.surface1
 
                         ColumnLayout {
                             id: statusAgentCol
@@ -3207,14 +3259,14 @@ PanelWindow {
                                 Item { Layout.fillWidth: true }
                                 Text {
                                     text: "Niri Wayland"
-                                    color: "#71717a"
+                                    color: root.theme.subtext0
                                     font.pixelSize: 10
                                 }
                             }
 
                             Text {
                                 text: root.activeDetail && root.activeDetail.length > 0 ? root.activeDetail : "Siap menerima prompt & task dari ganteng."
-                                color: "#d4d4d8"
+                                color: root.theme.textDim
                                 font.pixelSize: 11
                                 wrapMode: Text.Wrap
                                 Layout.fillWidth: true
@@ -3227,8 +3279,8 @@ PanelWindow {
                         Layout.fillWidth: true
                         implicitHeight: agentCol.implicitHeight + 16
                         radius: 8
-                        color: "#18181b"
-                        border.color: (root.agentAggregate("claude") === "waiting" || root.agentAggregate("opencode") === "waiting") ? "#f97316" : "#27272a"
+                        color: root.theme.surface0
+                        border.color: (root.agentAggregate("claude") === "waiting" || root.agentAggregate("opencode") === "waiting") ? "#f97316" : root.theme.surface1
 
                         ColumnLayout {
                             id: agentCol
@@ -3240,18 +3292,18 @@ PanelWindow {
                                 spacing: 6
                                 SourceLogo { kind: "claude"; size: 15 }
                                 SourceLogo { kind: "opencode"; size: 15 }
-                                Text { text: "Agent Coding"; color: "#f4f4f5"; font.pixelSize: 12; font.bold: true }
+                                Text { text: "Agent Coding"; color: root.theme.text; font.pixelSize: 12; font.bold: true }
                                 Item { Layout.fillWidth: true }
                                 Text {
                                     text: root.agentSessions.length > 0 ? root.agentSessions.length + " sesi" : ""
-                                    color: "#71717a"; font.pixelSize: 9
+                                    color: root.theme.subtext0; font.pixelSize: 9
                                 }
                             }
 
                             Text {
                                 visible: root.agentSessions.length === 0
                                 text: "Belum ada sesi Claude Code / OpenCode yang aktif"
-                                color: "#52525b"
+                                color: root.theme.overlay
                                 font.pixelSize: 9
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
@@ -3265,7 +3317,7 @@ PanelWindow {
                                     SourceLogo { kind: modelData.agent; size: 14 }
                                     Text {
                                         text: modelData.project || "?"
-                                        color: "#e4e4e7"; font.pixelSize: 10; font.bold: true
+                                        color: root.theme.textDim; font.pixelSize: 10; font.bold: true
                                         elide: Text.ElideRight
                                         Layout.preferredWidth: 80
                                     }
@@ -3283,7 +3335,7 @@ PanelWindow {
                                     }
                                     Text {
                                         text: modelData.detail || ""
-                                        color: "#a1a1aa"; font.pixelSize: 9
+                                        color: root.theme.subtext1; font.pixelSize: 9
                                         font.family: "JetBrains Mono, monospace"
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
@@ -3291,7 +3343,7 @@ PanelWindow {
                                     Text {
                                         // currentTimeSecs: dependensi agar "x dtk" ikut berdetak
                                         text: root.currentTimeSecs !== "" ? root.agoText(modelData.updated) : ""
-                                        color: "#52525b"; font.pixelSize: 8
+                                        color: root.theme.overlay; font.pixelSize: 8
                                     }
                                 }
                             }
@@ -3315,7 +3367,7 @@ PanelWindow {
                     // Section Title: System Hardware & Resource
                     Text {
                         text: "RESOURCE SISTEM (ARCH LINUX)"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                         topPadding: 2
@@ -3328,57 +3380,57 @@ PanelWindow {
 
                         // CPU Usage Card
                         Rectangle {
-                            Layout.fillWidth: true; height: 50; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 4
                                 RowLayout {
-                                    Text { text: "CPU"; color: "#71717a"; font.pixelSize: 9 }
+                                    Text { text: "CPU"; color: root.theme.subtext0; font.pixelSize: 9 }
                                     Item { Layout.fillWidth: true }
                                     Text { text: root.sysCpu + "%"; color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"; font.pixelSize: 10; font.bold: true }
                                 }
                                 Rectangle {
-                                    Layout.fillWidth: true; height: 4; radius: 2; color: "#27272a"
+                                    Layout.fillWidth: true; height: 4; radius: 2; color: root.theme.surface1
                                     Rectangle {
                                         width: parent.width * Math.min(1, root.sysCpu / 100.0)
                                         height: parent.height; radius: 2
                                         color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"
                                     }
                                 }
-                                Text { text: root.sysProcesses + " proses"; color: "#a1a1aa"; font.pixelSize: 9 }
+                                Text { text: root.sysProcesses + " proses"; color: root.theme.subtext1; font.pixelSize: 9 }
                             }
                         }
 
                         // RAM Usage Card
                         Rectangle {
-                            Layout.fillWidth: true; height: 50; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 4
                                 RowLayout {
-                                    Text { text: "RAM Terpakai"; color: "#71717a"; font.pixelSize: 9 }
+                                    Text { text: "RAM Terpakai"; color: root.theme.subtext0; font.pixelSize: 9 }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: "" + root.sysRamPercent + "%"; color: root.sysRamPercent > 85 ? "#ef4444" : "#38bdf8"; font.pixelSize: 10; font.bold: true }
+                                    Text { text: "" + root.sysRamPercent + "%"; color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent; font.pixelSize: 10; font.bold: true }
                                 }
                                 // Progress bar mini RAM
                                 Rectangle {
-                                    Layout.fillWidth: true; height: 4; radius: 2; color: "#27272a"
+                                    Layout.fillWidth: true; height: 4; radius: 2; color: root.theme.surface1
                                     Rectangle {
                                         width: parent.width * (root.sysRamPercent / 100.0)
                                         height: parent.height; radius: 2
-                                        color: root.sysRamPercent > 85 ? "#ef4444" : "#38bdf8"
+                                        color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent
                                     }
                                 }
-                                Text { text: root.sysRamUsed + " / " + root.sysRamTotal; color: "#a1a1aa"; font.pixelSize: 9 }
+                                Text { text: root.sysRamUsed + " / " + root.sysRamTotal; color: root.theme.subtext1; font.pixelSize: 9 }
                             }
                         }
 
                         // Uptime Card
                         Rectangle {
-                            Layout.fillWidth: true; height: 50; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 2
-                                Text { text: "System Uptime"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "System Uptime"; color: root.theme.subtext0; font.pixelSize: 9 }
                                 Text { text: root.sysUptime; color: "#22c55e"; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                Text { text: root.sysKernel; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: root.sysKernel; color: root.theme.subtext0; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
                             }
                         }
                     }
@@ -3401,7 +3453,7 @@ PanelWindow {
                     // Header: Hari Ini (Today)
                     Text {
                         text: "HARI INI (TODAY)"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -3412,29 +3464,29 @@ PanelWindow {
                         spacing: 6
 
                         Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Requests"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "Requests"; color: root.theme.subtext0; font.pixelSize: 9 }
                                 Text { text: "" + root.usageRequests; color: "#fff"; font.pixelSize: 13; font.bold: true }
                             }
                         }
 
                         Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Biaya Hari Ini"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "Biaya Hari Ini"; color: root.theme.subtext0; font.pixelSize: 9 }
                                 Text { text: "$" + root.usageCost.toFixed(2); color: "#22c55e"; font.pixelSize: 13; font.bold: true }
                             }
                         }
 
                         Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Tokens"; color: "#71717a"; font.pixelSize: 9 }
-                                Text { text: root.formatTokens(root.usageTokens); color: "#38bdf8"; font.pixelSize: 13; font.bold: true }
+                                Text { text: "Tokens"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: root.formatTokens(root.usageTokens); color: root.theme.accent; font.pixelSize: 13; font.bold: true }
                             }
                         }
                     }
@@ -3442,7 +3494,7 @@ PanelWindow {
                     // Header: Akumulasi 60 Hari Terakhir
                     Text {
                         text: "TOTAL 60 HARI TERAKHIR (ALL-TIME 60D)"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                         topPadding: 2
@@ -3454,28 +3506,28 @@ PanelWindow {
                         spacing: 6
 
                         Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Requests"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "Total Requests"; color: root.theme.subtext0; font.pixelSize: 9 }
                                 Text { text: "" + root.usage60dRequests; color: "#facc15"; font.pixelSize: 13; font.bold: true }
                             }
                         }
 
                         Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Biaya (60d)"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "Total Biaya (60d)"; color: root.theme.subtext0; font.pixelSize: 9 }
                                 Text { text: "$" + root.usage60dCost.toFixed(2); color: "#4ade80"; font.pixelSize: 13; font.bold: true }
                             }
                         }
 
                         Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Tokens (60d)"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "Total Tokens (60d)"; color: root.theme.subtext0; font.pixelSize: 9 }
                                 Text { text: root.formatTokens(root.usage60dTokens); color: "#a855f7"; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -3484,7 +3536,7 @@ PanelWindow {
                     // Section: Model AI Aktif & Recent Requests
                     Text {
                         text: "MODEL AI AKTIF HARI INI"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                         topPadding: 2
@@ -3493,7 +3545,7 @@ PanelWindow {
                     Text {
                         visible: root.activeModelsList.length === 0
                         text: "Belum ada request hari ini"
-                        color: "#52525b"
+                        color: root.theme.overlay
                         font.pixelSize: 10
                     }
 
@@ -3507,8 +3559,8 @@ PanelWindow {
                                 width: parent.width
                                 height: 26
                                 radius: 6
-                                color: "#18181b"
-                                border.color: "#27272a"
+                                color: root.theme.surface0
+                                border.color: root.theme.surface1
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -3522,7 +3574,7 @@ PanelWindow {
 
                                     Text {
                                         text: modelData.name
-                                        color: "#f4f4f5"
+                                        color: root.theme.text
                                         font.pixelSize: 11
                                         font.bold: true
                                         elide: Text.ElideRight
@@ -3531,7 +3583,7 @@ PanelWindow {
 
                                     Text {
                                         text: "" + modelData.requests + " reqs"
-                                        color: "#a1a1aa"
+                                        color: root.theme.subtext1
                                         font.pixelSize: 10
                                     }
 
@@ -3548,16 +3600,16 @@ PanelWindow {
 
                     // Status Bar Ringkas
                     Rectangle {
-                        Layout.fillWidth: true; height: 30; radius: 6; color: "#18181b"; border.color: "#27272a"
+                        Layout.fillWidth: true; height: 30; radius: 6; color: root.theme.surface0; border.color: root.theme.surface1
                         RowLayout {
                             anchors.fill: parent; anchors.margins: 8
-                            Text { text: "Gateway 9Router"; color: "#71717a"; font.pixelSize: 10 }
+                            Text { text: "Gateway 9Router"; color: root.theme.subtext0; font.pixelSize: 10 }
                             Item { Layout.fillWidth: true }
                             // Status nyata dari bridge, bukan label "Active" statis.
-                            Rectangle { width: 6; height: 6; radius: 3; color: !root.usageLoaded ? "#71717a" : (root.usageAvailable ? "#22c55e" : "#ef4444") }
+                            Rectangle { width: 6; height: 6; radius: 3; color: !root.usageLoaded ? root.theme.subtext0 : (root.usageAvailable ? "#22c55e" : "#ef4444") }
                             Text {
                                 text: !root.usageLoaded ? "Memuat…" : (root.usageAvailable ? "Database terbaca" : "Data tidak tersedia")
-                                color: !root.usageLoaded ? "#71717a" : (root.usageAvailable ? "#22c55e" : "#ef4444")
+                                color: !root.usageLoaded ? root.theme.subtext0 : (root.usageAvailable ? "#22c55e" : "#ef4444")
                                 font.pixelSize: 10; font.bold: true
                             }
                         }
@@ -3580,7 +3632,7 @@ PanelWindow {
 
                     Text {
                         text: "QUICK LAUNCH & SHORTCUTS"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -3597,8 +3649,8 @@ PanelWindow {
                             Layout.fillWidth: true
                             implicitHeight: 52
                             radius: 8
-                            color: vscodeHover.containsMouse ? "#27272a" : "#18181b"
-                            border.color: vscodeHover.containsMouse ? "#5b7fe5" : "#27272a"
+                            color: vscodeHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                            border.color: vscodeHover.containsMouse ? "#5b7fe5" : root.theme.surface1
                             border.width: 1
 
                             Behavior on color { ColorAnimation { duration: 150 } }
@@ -3621,8 +3673,8 @@ PanelWindow {
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 2
-                                    Text { text: "Visual Studio Code"; color: "#f4f4f5"; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Text { text: "Code Editor"; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Visual Studio Code"; color: root.theme.text; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Code Editor"; color: root.theme.subtext0; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
                                 }
                             }
                             MouseArea {
@@ -3639,8 +3691,8 @@ PanelWindow {
                             Layout.fillWidth: true
                             implicitHeight: 52
                             radius: 8
-                            color: kittyHover.containsMouse ? "#27272a" : "#18181b"
-                            border.color: kittyHover.containsMouse ? "#ffffff" : "#27272a"
+                            color: kittyHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                            border.color: kittyHover.containsMouse ? "#ffffff" : root.theme.surface1
                             border.width: 1
 
                             Behavior on color { ColorAnimation { duration: 150 } }
@@ -3663,8 +3715,8 @@ PanelWindow {
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 2
-                                    Text { text: "Kitty Terminal"; color: "#f4f4f5"; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Text { text: "Shell Emulator"; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Kitty Terminal"; color: root.theme.text; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Shell Emulator"; color: root.theme.subtext0; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
                                 }
                             }
                             MouseArea {
@@ -3681,8 +3733,8 @@ PanelWindow {
                             Layout.fillWidth: true
                             implicitHeight: 52
                             radius: 8
-                            color: filesHover.containsMouse ? "#27272a" : "#18181b"
-                            border.color: filesHover.containsMouse ? "#d97706" : "#27272a"
+                            color: filesHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                            border.color: filesHover.containsMouse ? "#d97706" : root.theme.surface1
                             border.width: 1
 
                             Behavior on color { ColorAnimation { duration: 150 } }
@@ -3705,8 +3757,8 @@ PanelWindow {
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 2
-                                    Text { text: "Files Manager"; color: "#f4f4f5"; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Text { text: "Explore Directory"; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Files Manager"; color: root.theme.text; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Explore Directory"; color: root.theme.subtext0; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
                                 }
                             }
                             MouseArea {
@@ -3723,8 +3775,8 @@ PanelWindow {
                             Layout.fillWidth: true
                             implicitHeight: 52
                             radius: 8
-                            color: shotHover.containsMouse ? "#27272a" : "#18181b"
-                            border.color: shotHover.containsMouse ? "#22c55e" : "#27272a"
+                            color: shotHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                            border.color: shotHover.containsMouse ? "#22c55e" : root.theme.surface1
                             border.width: 1
 
                             Behavior on color { ColorAnimation { duration: 150 } }
@@ -3747,8 +3799,8 @@ PanelWindow {
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 2
-                                    Text { text: "Screenshot Area"; color: "#f4f4f5"; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Text { text: "Grim + Slurp crop"; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Screenshot Area"; color: root.theme.text; font.pixelSize: 11; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: "Grim + Slurp crop"; color: root.theme.subtext0; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
                                 }
                             }
                             MouseArea {
@@ -3763,7 +3815,7 @@ PanelWindow {
 
                     Text {
                         text: "AUDIO & VOLUME CONTROL"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                         topPadding: 4
@@ -3771,7 +3823,7 @@ PanelWindow {
 
                     // Audio Quick Control Bar (Konsisten & Rapi)
                     Rectangle {
-                        Layout.fillWidth: true; height: 46; radius: 8; color: "#18181b"; border.color: "#27272a"
+                        Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                         RowLayout {
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; spacing: 10
 
@@ -3782,16 +3834,16 @@ PanelWindow {
 
                             Column {
                                 spacing: 1
-                                Text { text: "Volume Speaker"; color: "#f4f4f5"; font.pixelSize: 11; font.bold: true }
-                                Text { text: "PipeWire Audio"; color: "#71717a"; font.pixelSize: 9 }
+                                Text { text: "Volume Speaker"; color: root.theme.text; font.pixelSize: 11; font.bold: true }
+                                Text { text: "PipeWire Audio"; color: root.theme.subtext0; font.pixelSize: 9 }
                             }
 
                             Item { Layout.fillWidth: true }
 
                             // Tombol -5%
                             Rectangle {
-                                width: 44; height: 28; radius: 6; color: volDownHover.containsMouse ? "#27272a" : "#202024"
-                                border.color: "#27272a"
+                                width: 44; height: 28; radius: 6; color: volDownHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                                border.color: root.theme.surface1
                                 Text { anchors.centerIn: parent; text: "-5%"; color: "#fff"; font.pixelSize: 10; font.bold: true }
                                 MouseArea {
                                     id: volDownHover
@@ -3804,7 +3856,7 @@ PanelWindow {
 
                             // Tombol Mute / Unmute
                             Rectangle {
-                                width: 52; height: 28; radius: 6; color: volMuteHover.containsMouse ? "#ef444433" : "#202024"
+                                width: 52; height: 28; radius: 6; color: volMuteHover.containsMouse ? "#ef444433" : root.theme.surface0
                                 border.color: "#ef4444"
                                 border.width: 1
                                 Text { anchors.centerIn: parent; text: "Mute"; color: "#ef4444"; font.pixelSize: 10; font.bold: true }
@@ -3819,8 +3871,8 @@ PanelWindow {
 
                             // Tombol +5%
                             Rectangle {
-                                width: 44; height: 28; radius: 6; color: volUpHover.containsMouse ? "#27272a" : "#202024"
-                                border.color: "#27272a"
+                                width: 44; height: 28; radius: 6; color: volUpHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                                border.color: root.theme.surface1
                                 Text { anchors.centerIn: parent; text: "+5%"; color: "#fff"; font.pixelSize: 10; font.bold: true }
                                 MouseArea {
                                     id: volUpHover
@@ -3855,7 +3907,7 @@ PanelWindow {
                             spacing: 6
                             Text {
                                 text: "PROJECTS & DEPLOYMENT LINKS"
-                                color: "#f4f4f5"
+                                color: root.theme.text
                                 font.pixelSize: 11
                                 font.bold: true
                             }
@@ -3865,12 +3917,12 @@ PanelWindow {
 
                         Rectangle {
                             width: 60; height: 22; radius: 5
-                            color: refreshHover.containsMouse ? "#27272a" : "#18181b"
-                            border.color: "#3f3f46"; border.width: 1
+                            color: refreshHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                            border.color: root.theme.surface2; border.width: 1
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 4
-                                Text { text: "Refresh"; color: "#a1a1aa"; font.pixelSize: 9; font.bold: true }
+                                Text { text: "Refresh"; color: root.theme.subtext1; font.pixelSize: 9; font.bold: true }
                             }
                             MouseArea {
                                 id: refreshHover
@@ -3885,8 +3937,8 @@ PanelWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 8
-                        color: "#121215"
-                        border.color: "#27272a"
+                        color: root.theme.mantle
+                        border.color: root.theme.surface1
                         border.width: 1
 
                         ListView {
@@ -3901,7 +3953,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: root.gitProjectsList.length === 0
                                 text: "Memuat project… (atau tidak ada di ~/Projects/project-web)"
-                                color: "#52525b"
+                                color: root.theme.overlay
                                 font.pixelSize: 11
                             }
 
@@ -3909,8 +3961,8 @@ PanelWindow {
                                 width: projectsListView.width
                                 implicitHeight: projCol.implicitHeight + 14
                                 radius: 8
-                                color: modelData.is_active ? "#18181b" : "#141416"
-                                border.color: modelData.is_active ? "#0284c7" : "#27272a"
+                                color: modelData.is_active ? root.theme.surface0 : root.theme.mantle
+                                border.color: modelData.is_active ? "#0284c7" : root.theme.surface1
                                 border.width: modelData.is_active ? 1 : 1
 
                                 ColumnLayout {
@@ -3974,14 +4026,14 @@ PanelWindow {
                                             implicitWidth: cTodayLbl.implicitWidth + 8
                                             height: 14
                                             radius: 3
-                                            color: modelData.commits_today > 0 ? "#052e16" : "#27272a"
-                                            border.color: modelData.commits_today > 0 ? "#22c55e" : "#3f3f46"
+                                            color: modelData.commits_today > 0 ? "#052e16" : root.theme.surface1
+                                            border.color: modelData.commits_today > 0 ? "#22c55e" : root.theme.surface2
                                             border.width: 1
                                             Text {
                                                 id: cTodayLbl
                                                 anchors.centerIn: parent
                                                 text: modelData.commits_today > 0 ? (modelData.commits_today + " commit hari ini") : "0 commit"
-                                                color: modelData.commits_today > 0 ? "#86efac" : "#71717a"
+                                                color: modelData.commits_today > 0 ? "#86efac" : root.theme.subtext0
                                                 font.pixelSize: 8
                                                 font.bold: true
                                             }
@@ -4001,7 +4053,7 @@ PanelWindow {
                                     Text {
                                         Layout.fillWidth: true
                                         text: modelData.last_commit || "-"
-                                        color: "#71717a"
+                                        color: root.theme.subtext0
                                         font.pixelSize: 9
                                         font.family: "JetBrains Mono, monospace"
                                         elide: Text.ElideRight
@@ -4077,8 +4129,8 @@ PanelWindow {
                                             implicitWidth: codeRow.implicitWidth + 10
                                             height: 20
                                             radius: 4
-                                            color: codeHover.containsMouse ? "#27272a" : "#18181b"
-                                            border.color: "#3f3f46"
+                                            color: codeHover.containsMouse ? root.theme.surface1 : root.theme.surface0
+                                            border.color: root.theme.surface2
                                             border.width: 1
 
                                             RowLayout {
@@ -4087,7 +4139,7 @@ PanelWindow {
                                                 spacing: 4
                                                 Text {
                                                     text: "VS Code"
-                                                    color: "#d4d4d8"
+                                                    color: root.theme.textDim
                                                     font.pixelSize: 9
                                                 }
                                             }
@@ -4114,7 +4166,7 @@ PanelWindow {
 
                     Text {
                         text: "DEV SERVERS"
-                        color: "#71717a"
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -4124,8 +4176,8 @@ PanelWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 8
-                        color: "#121215"
-                        border.color: "#27272a"
+                        color: root.theme.mantle
+                        border.color: root.theme.surface1
                         border.width: 1
 
                         ListView {
@@ -4140,7 +4192,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: root.devServers.length === 0
                                 text: root.bridgeReady ? "Tidak ada project dev server" : "Bridge belum siap…"
-                                color: "#52525b"
+                                color: root.theme.overlay
                                 font.pixelSize: 11
                             }
 
@@ -4149,8 +4201,8 @@ PanelWindow {
                                 width: devListView.width
                                 implicitHeight: 46
                                 radius: 6
-                                color: devRow.anyRunning ? "#18181b" : "#141416"
-                                border.color: devRow.anyRunning ? "#22c55e44" : "#27272a"
+                                color: devRow.anyRunning ? root.theme.surface0 : root.theme.mantle
+                                border.color: devRow.anyRunning ? "#22c55e44" : root.theme.surface1
                                 border.width: 1
 
                                 property var php: root.devService(modelData.id, "php")
@@ -4173,7 +4225,7 @@ PanelWindow {
                                             spacing: 5
                                             Rectangle {
                                                 width: 6; height: 6; radius: 3
-                                                color: devRow.anyRunning ? "#22c55e" : "#3f3f46"
+                                                color: devRow.anyRunning ? "#22c55e" : root.theme.surface2
                                             }
                                             Text {
                                                 text: modelData.name
@@ -4188,7 +4240,7 @@ PanelWindow {
                                         Text {
                                             Layout.fillWidth: true
                                             elide: Text.ElideRight
-                                            color: "#71717a"
+                                            color: root.theme.subtext0
                                             font.pixelSize: 9
                                             text: {
                                                 let parts = [];
@@ -4207,13 +4259,13 @@ PanelWindow {
                                         Layout.preferredWidth: 46
                                         height: 22
                                         radius: 4
-                                        color: devRow.php.running ? "#052e16" : "#18181b"
-                                        border.color: devRow.php.running ? "#22c55e" : "#3f3f46"
+                                        color: devRow.php.running ? "#052e16" : root.theme.surface0
+                                        border.color: devRow.php.running ? "#22c55e" : root.theme.surface2
                                         border.width: 1
                                         Text {
                                             anchors.centerIn: parent
                                             text: "serve"
-                                            color: devRow.php.running ? "#86efac" : "#a1a1aa"
+                                            color: devRow.php.running ? "#86efac" : root.theme.subtext1
                                             font.pixelSize: 9
                                             font.bold: true
                                         }
@@ -4230,13 +4282,13 @@ PanelWindow {
                                         Layout.preferredWidth: 52
                                         height: 22
                                         radius: 4
-                                        color: devRow.npm.running ? "#052e16" : "#18181b"
-                                        border.color: devRow.npm.running ? "#22c55e" : "#3f3f46"
+                                        color: devRow.npm.running ? "#052e16" : root.theme.surface0
+                                        border.color: devRow.npm.running ? "#22c55e" : root.theme.surface2
                                         border.width: 1
                                         Text {
                                             anchors.centerIn: parent
                                             text: "npm dev"
-                                            color: devRow.npm.running ? "#86efac" : "#a1a1aa"
+                                            color: devRow.npm.running ? "#86efac" : root.theme.subtext1
                                             font.pixelSize: 9
                                             font.bold: true
                                         }
@@ -4255,14 +4307,14 @@ PanelWindow {
                                         color: {
                                             if (devRow.availableCount > devRow.runningCount)
                                                 return devStartHover.containsMouse ? "#14532d" : "#052e16";
-                                            return "#18181b";
+                                            return root.theme.surface0;
                                         }
-                                        border.color: devRow.availableCount > devRow.runningCount ? "#22c55e" : "#27272a"
+                                        border.color: devRow.availableCount > devRow.runningCount ? "#22c55e" : root.theme.surface1
                                         border.width: 1
                                         Text {
                                             anchors.centerIn: parent
                                             text: "Start"
-                                            color: devRow.availableCount > devRow.runningCount ? "#86efac" : "#52525b"
+                                            color: devRow.availableCount > devRow.runningCount ? "#86efac" : root.theme.overlay
                                             font.pixelSize: 9
                                             font.bold: true
                                         }
@@ -4286,14 +4338,14 @@ PanelWindow {
                                         color: {
                                             if (devRow.runningCount > 0)
                                                 return devStopHover.containsMouse ? "#450a0a" : "#1c1917";
-                                            return "#18181b";
+                                            return root.theme.surface0;
                                         }
-                                        border.color: devRow.runningCount > 0 ? "#ef4444" : "#27272a"
+                                        border.color: devRow.runningCount > 0 ? "#ef4444" : root.theme.surface1
                                         border.width: 1
                                         Text {
                                             anchors.centerIn: parent
                                             text: "Stop"
-                                            color: devRow.runningCount > 0 ? "#fca5a5" : "#52525b"
+                                            color: devRow.runningCount > 0 ? "#fca5a5" : root.theme.overlay
                                             font.pixelSize: 9
                                             font.bold: true
                                         }
@@ -4330,12 +4382,12 @@ PanelWindow {
                             width: 8; height: 8; radius: 4
                             color: root.interviewState === "listening" ? (root.interviewSpeaking ? "#ef4444" : "#22c55e")
                                  : root.interviewState === "loading" ? "#f59e0b"
-                                 : root.interviewState === "error" ? "#ef4444" : "#3f3f46"
+                                 : root.interviewState === "error" ? "#ef4444" : root.theme.surface2
                         }
                         Text {
                             Layout.fillWidth: true
                             elide: Text.ElideRight
-                            color: root.interviewState === "error" ? "#fca5a5" : "#a1a1aa"
+                            color: root.interviewState === "error" ? "#fca5a5" : root.theme.subtext1
                             font.pixelSize: 10
                             text: root.interviewState === "listening"
                                   ? (root.interviewThinking ? "Menyusun jawaban…" : root.interviewSpeaking ? "Lawan bicara berbicara…" : "Mendengarkan")
@@ -4346,7 +4398,7 @@ PanelWindow {
                         Rectangle {
                             visible: root.interviewRunning
                             width: 40; height: 4; radius: 2
-                            color: "#27272a"
+                            color: root.theme.surface1
                             Rectangle {
                                 width: parent.width * Math.min(1, root.interviewLevel)
                                 height: parent.height; radius: 2
@@ -4362,10 +4414,10 @@ PanelWindow {
                                 readonly property bool chosen: root.interviewSource === modelData.key
                                 width: 44; height: 22; radius: 4
                                 opacity: root.interviewRunning && !chosen ? 0.4 : 1
-                                color: chosen ? "#1e1b4b" : "#18181b"
-                                border.color: chosen ? "#818cf8" : "#3f3f46"
+                                color: chosen ? "#1e1b4b" : root.theme.surface0
+                                border.color: chosen ? "#818cf8" : root.theme.surface2
                                 border.width: 1
-                                Text { anchors.centerIn: parent; text: modelData.label; color: parent.chosen ? "#c7d2fe" : "#a1a1aa"; font.pixelSize: 9; font.bold: true }
+                                Text { anchors.centerIn: parent; text: modelData.label; color: parent.chosen ? "#c7d2fe" : root.theme.subtext1; font.pixelSize: 9; font.bold: true }
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
@@ -4377,10 +4429,10 @@ PanelWindow {
 
                         Rectangle {
                             width: 40; height: 22; radius: 4
-                            color: root.interviewAuto ? "#052e16" : "#18181b"
-                            border.color: root.interviewAuto ? "#22c55e" : "#3f3f46"
+                            color: root.interviewAuto ? "#052e16" : root.theme.surface0
+                            border.color: root.interviewAuto ? "#22c55e" : root.theme.surface2
                             border.width: 1
-                            Text { anchors.centerIn: parent; text: "Auto"; color: root.interviewAuto ? "#86efac" : "#a1a1aa"; font.pixelSize: 9; font.bold: true }
+                            Text { anchors.centerIn: parent; text: "Auto"; color: root.interviewAuto ? "#86efac" : root.theme.subtext1; font.pixelSize: 9; font.bold: true }
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
@@ -4395,10 +4447,10 @@ PanelWindow {
                         Rectangle {
                             readonly property bool usable: root.interviewTranscript.length > 0
                             width: 44; height: 22; radius: 4
-                            color: usable ? (jawabHover.containsMouse ? "#1e3a8a" : "#172554") : "#18181b"
-                            border.color: usable ? "#3b82f6" : "#27272a"
+                            color: usable ? (jawabHover.containsMouse ? "#1e3a8a" : "#172554") : root.theme.surface0
+                            border.color: usable ? "#3b82f6" : root.theme.surface1
                             border.width: 1
-                            Text { anchors.centerIn: parent; text: "Jawab"; color: parent.usable ? "#93c5fd" : "#52525b"; font.pixelSize: 9; font.bold: true }
+                            Text { anchors.centerIn: parent; text: "Jawab"; color: parent.usable ? "#93c5fd" : root.theme.overlay; font.pixelSize: 9; font.bold: true }
                             MouseArea {
                                 id: jawabHover
                                 anchors.fill: parent
@@ -4439,8 +4491,8 @@ PanelWindow {
                         Layout.preferredHeight: 1
                         Layout.maximumHeight: 84
                         radius: 8
-                        color: "#0e0e10"
-                        border.color: "#27272a"
+                        color: root.theme.mantle
+                        border.color: root.theme.surface1
                         border.width: 1
 
                         ListView {
@@ -4456,7 +4508,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: root.interviewTranscript.length === 0
                                 text: root.interviewRunning ? "Transkrip akan muncul di sini…" : "TRANSKRIP"
-                                color: "#52525b"
+                                color: root.theme.overlay
                                 font.pixelSize: 10
                             }
 
@@ -4464,7 +4516,7 @@ PanelWindow {
                                 required property var modelData
                                 width: ivTranscriptView.width
                                 wrapMode: Text.Wrap
-                                color: "#a1a1aa"
+                                color: root.theme.subtext1
                                 font.pixelSize: 10
                                 textFormat: Text.PlainText
                                 text: modelData.time.slice(0, 5) + "  " + modelData.text
@@ -4478,8 +4530,8 @@ PanelWindow {
                         Layout.fillHeight: true
                         Layout.preferredHeight: 4
                         radius: 8
-                        color: "#121215"
-                        border.color: root.interviewThinking ? "#3b82f6" : "#27272a"
+                        color: root.theme.mantle
+                        border.color: root.interviewThinking ? "#3b82f6" : root.theme.surface1
                         border.width: 1
 
                         ColumnLayout {
@@ -4493,7 +4545,7 @@ PanelWindow {
                                 Text {
                                     Layout.fillWidth: true
                                     elide: Text.ElideRight
-                                    color: "#71717a"
+                                    color: root.theme.subtext0
                                     font.pixelSize: 9
                                     font.italic: true
                                     text: root.interviewShownAnswer ? "❝ " + root.interviewShownAnswer.question : "SARAN JAWABAN"
@@ -4501,7 +4553,7 @@ PanelWindow {
                                 Text {
                                     visible: root.interviewAnswers.length > 1
                                     text: "‹"
-                                    color: root.interviewAnswerIndex < root.interviewAnswers.length - 1 ? "#e4e4e7" : "#3f3f46"
+                                    color: root.interviewAnswerIndex < root.interviewAnswers.length - 1 ? root.theme.textDim : root.theme.surface2
                                     font.pixelSize: 13; font.bold: true
                                     MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor
                                         onClicked: if (root.interviewAnswerIndex < root.interviewAnswers.length - 1) root.interviewAnswerIndex += 1 }
@@ -4509,12 +4561,12 @@ PanelWindow {
                                 Text {
                                     visible: root.interviewAnswers.length > 1
                                     text: (root.interviewAnswerIndex + 1) + "/" + root.interviewAnswers.length
-                                    color: "#71717a"; font.pixelSize: 9
+                                    color: root.theme.subtext0; font.pixelSize: 9
                                 }
                                 Text {
                                     visible: root.interviewAnswers.length > 1
                                     text: "›"
-                                    color: root.interviewAnswerIndex > 0 ? "#e4e4e7" : "#3f3f46"
+                                    color: root.interviewAnswerIndex > 0 ? root.theme.textDim : root.theme.surface2
                                     font.pixelSize: 13; font.bold: true
                                     MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor
                                         onClicked: if (root.interviewAnswerIndex > 0) root.interviewAnswerIndex -= 1 }
@@ -4536,7 +4588,7 @@ PanelWindow {
                                     readOnly: true
                                     selectByMouse: true
                                     wrapMode: TextEdit.Wrap
-                                    color: root.interviewShownAnswer && root.interviewShownAnswer.error ? "#fca5a5" : "#f4f4f5"
+                                    color: root.interviewShownAnswer && root.interviewShownAnswer.error ? "#fca5a5" : root.theme.text
                                     selectionColor: "#3b82f6"
                                     font.pixelSize: 14
                                     text: {
