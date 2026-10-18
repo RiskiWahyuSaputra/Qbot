@@ -35,7 +35,10 @@ PanelWindow {
 
     property bool islandExpanded: false
     property bool kbdMode: false             // island dibuka lewat hotkey, fokus keyboard eksklusif
-    onIslandExpandedChanged: if (!islandExpanded && notifyType !== "request") kbdMode = false
+    // Fokus eksklusif dilepas begitu tidak ada lagi panel atau kartu yang terbuka;
+    // tanpa ini QBot terus menahan keyboard setelah kartu izin dijawab.
+    onIslandExpandedChanged: if (!islandExpanded && notifyType !== "request" && notifyType !== "approval") kbdMode = false
+    onNotifyTypeChanged: if (notifyType !== "request" && notifyType !== "approval" && !islandExpanded) kbdMode = false
     property bool isNotifying: false
     property string notifyType: "" // "done" | "approval"
     property string activeTab: "notes" // Default tab Catatan; dipulihkan dari settings saat dimuat
@@ -249,6 +252,12 @@ PanelWindow {
             root.kbdMode = false;
             root.islandExpanded = false;
         }
+        // Ringkasan state sebagai JSON, untuk skrip / status bar.
+        function status(): string {
+            return JSON.stringify({expanded: root.islandExpanded, keyboard: root.kbdMode, tab: root.activeTab,
+                                   notify: root.notifyType, pending: root.agentRequests.length,
+                                   hermes: root.hermesConnected, sessions: root.agentSessions.length});
+        }
         function tab(name: string): string {
             if (root.tabKeys.indexOf(name) < 0) return "tab tidak dikenal: " + name + " (" + root.tabKeys.join(", ") + ")";
             open();
@@ -290,13 +299,14 @@ PanelWindow {
         return key === Qt.Key_Return || key === Qt.Key_Enter;
     }
 
-    // Keyboard: kartu izin (Y/Enter izinkan, N tolak, A selalu, T terminal),
+    // Keyboard: kartu izin (Y izinkan, N tolak, A selalu, T terminal; sengaja bukan
+    // Enter, supaya Enter yang diketik untuk jendela lain tidak memberi izin),
     // pertanyaan (1-9 pilih, Enter lanjut, Backspace kembali), approval Hermes
     // (Y/N), dan panel (1-4 grup, 5 Interview, ←→ / Tab pindah tab, Esc tutup).
     function handleKey(event) {
         let k = event.key;
         if (notifyType === "approval") {
-            if (k === Qt.Key_Y || isEnter(k)) submitDecision("allow");
+            if (k === Qt.Key_Y) submitDecision("allow");
             else if (k === Qt.Key_N) submitDecision("deny");
             else if (k === Qt.Key_Escape) kbdMode = false;
             else return;
@@ -305,7 +315,7 @@ PanelWindow {
             if (k === Qt.Key_Escape) kbdMode = false;
             else if (k === Qt.Key_T) submitRequestAnswer({decision: "terminal"});
             else if (currentRequest.kind === "permission") {
-                if (k === Qt.Key_Y || isEnter(k)) submitRequestAnswer({decision: "allow"});
+                if (k === Qt.Key_Y) submitRequestAnswer({decision: "allow"});
                 else if (k === Qt.Key_N) submitRequestAnswer({decision: "deny"});
                 else if (k === Qt.Key_A && currentRequest.can_always) submitRequestAnswer({decision: "always"});
                 else return;

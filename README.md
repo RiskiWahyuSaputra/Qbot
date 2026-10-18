@@ -108,7 +108,8 @@ Island yang dibuka lewat hotkey langsung menerima keyboard; `Esc` menutupnya.
 | `1`–`4` | grup Agent / Kerja / Sistem / Catatan | – | pilih opsi (`1`–`9`) |
 | `5` | Interview | – | – |
 | `←` `→` / `Tab` | sub-tab sebelumnya/berikutnya | – | – |
-| `Y` / `Enter` | – | Izinkan | `Enter` = Lanjut/Kirim |
+| `Y` | – | Izinkan (sengaja bukan `Enter`) | – |
+| `Enter` | – | – | Lanjut/Kirim |
 | `N` | – | Tolak | – |
 | `A` | – | Selalu izinkan (bila ditawarkan) | – |
 | `T` | – | Jawab di terminal | Jawab di terminal |
