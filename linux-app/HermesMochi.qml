@@ -17,7 +17,10 @@ PanelWindow {
     WlrLayershell.exclusiveZone: 0
     // OnDemand saat panel terbuka: tanpa ini TextField catatan tidak pernah
     // menerima ketikan. Compositor memberi fokus hanya setelah diklik.
-    WlrLayershell.keyboardFocus: ((islandExpanded && !isNotifying) || notifyType === "request") ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    // Dibuka lewat hotkey (IPC): ambil keyboard penuh supaya navigasi tombol
+    // langsung jalan tanpa klik; dilepas lagi saat island menutup.
+    WlrLayershell.keyboardFocus: kbdMode ? WlrKeyboardFocus.Exclusive
+        : ((islandExpanded && !isNotifying) || notifyType === "request") ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     implicitWidth: 720
     // Kartu permintaan bisa tinggi; area transparan tetap click-through (mask = capsule).
@@ -31,6 +34,8 @@ PanelWindow {
     }
 
     property bool islandExpanded: false
+    property bool kbdMode: false             // island dibuka lewat hotkey, fokus keyboard eksklusif
+    onIslandExpandedChanged: if (!islandExpanded && notifyType !== "request") kbdMode = false
     property bool isNotifying: false
     property string notifyType: "" // "done" | "approval"
     property string activeTab: "notes" // Default tab Catatan; dipulihkan dari settings saat dimuat
@@ -68,6 +73,36 @@ PanelWindow {
         id: settingsWriteTimer
         interval: 400
         onTriggered: settingsFile.writeAdapter()
+    }
+
+    // Kendali dari luar, mis. keybind Niri:
+    //   Mod+Space { spawn "qs" "-p" "<repo>/linux-app/HermesMochi.qml" "ipc" "call" "qbot" "toggle"; }
+    IpcHandler {
+        target: "qbot"
+
+        function toggle(): void {
+            if (root.islandExpanded || root.kbdMode) close();
+            else open();
+        }
+        // Kartu izin/pertanyaan yang sedang tampil ikut mendapat fokus keyboard.
+        function open(): void {
+            root.kbdMode = true;
+            if (root.notifyType !== "request" && root.notifyType !== "approval") {
+                root.isNotifying = false;
+                root.notifyType = "";
+                root.islandExpanded = true;
+            }
+        }
+        function close(): void {
+            root.kbdMode = false;
+            root.islandExpanded = false;
+        }
+        function tab(name: string): string {
+            if (root.tabKeys.indexOf(name) < 0) return "tab tidak dikenal: " + name + " (" + root.tabKeys.join(", ") + ")";
+            root.activeTab = name;
+            open();
+            return "ok";
+        }
     }
 
     // Status

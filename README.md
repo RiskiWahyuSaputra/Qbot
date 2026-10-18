@@ -73,6 +73,29 @@ cd Qbot
 `HERMES_COUCOU_PYTHON`, lalu menyalakan Quickshell. Peringatan dependensi
 dicetak ke stderr bila ada yang kurang.
 
+Preferensi (avatar, tab terakhir, dll.) tersimpan di
+`~/.config/hermes-coucou/settings.json`.
+
+## Hotkey & IPC
+
+QBot bisa dikendalikan dari luar lewat IPC Quickshell:
+
+```bash
+QBOT=~/Projects/project-web/hermes-coucou/linux-app/HermesMochi.qml   # sesuaikan
+qs -p $QBOT ipc call qbot toggle        # buka/tutup island
+qs -p $QBOT ipc call qbot open          # buka (juga memberi fokus ke kartu izin)
+qs -p $QBOT ipc call qbot close
+qs -p $QBOT ipc call qbot tab status    # buka langsung ke tab tertentu
+```
+
+Contoh keybind Niri (`~/.config/niri/config.kdl`, di dalam `binds { }`):
+
+```kdl
+Mod+Space { spawn "qs" "-p" "/path/ke/Qbot/linux-app/HermesMochi.qml" "ipc" "call" "qbot" "toggle"; }
+```
+
+Island yang dibuka lewat hotkey langsung menerima keyboard; `Esc` menutupnya.
+
 ## Approval Hermes
 
 - Request approval **asli** datang dari WebSocket Hermes, punya
