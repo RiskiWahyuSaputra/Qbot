@@ -26,7 +26,8 @@ backend integrasi **Hermes Agent**.
 - **Status agent coding** — sesi Claude Code dan OpenCode: bekerja, butuh izin, selesai.
 - **Jawab izin & pertanyaan** agent langsung dari island.
 - **Interview Assist** — transkrip lokal (faster-whisper) + saran jawaban dari LLM.
-- **Tab Status** — sistem, media (playerctl), catatan, screenshot, dev server.
+- **Panel 4 grup** — Agent (Hermes + sesi coding), Kerja (Projects, Dev Server),
+  Sistem (CPU/RAM, 9Router, Tools), Catatan; plus mode Interview.
 
 ## Arsitektur
 
@@ -86,6 +87,7 @@ qs -p $QBOT ipc call qbot toggle        # buka/tutup island
 qs -p $QBOT ipc call qbot open          # buka (juga memberi fokus ke kartu izin)
 qs -p $QBOT ipc call qbot close
 qs -p $QBOT ipc call qbot tab status    # buka langsung ke tab tertentu
+# tab: agent, projects, dev, status, usage, tools, notes, interview
 ```
 
 Contoh keybind Niri (`~/.config/niri/config.kdl`, di dalam `binds { }`):
@@ -98,8 +100,9 @@ Island yang dibuka lewat hotkey langsung menerima keyboard; `Esc` menutupnya.
 
 | Tombol | Di panel | Di kartu izin | Di kartu pertanyaan |
 |---|---|---|---|
-| `1`–`7` | pindah tab | – | pilih opsi |
-| `←` `→` / `Tab` | tab sebelumnya/berikutnya | – | – |
+| `1`–`4` | grup Agent / Kerja / Sistem / Catatan | – | pilih opsi (`1`–`9`) |
+| `5` | Interview | – | – |
+| `←` `→` / `Tab` | sub-tab sebelumnya/berikutnya | – | – |
 | `Y` / `Enter` | – | Izinkan | `Enter` = Lanjut/Kirim |
 | `N` | – | Tolak | – |
 | `A` | – | Selalu izinkan (bila ditawarkan) | – |
@@ -139,7 +142,7 @@ python3 linux-app/agent_hooks_install.py --uninstall  # lepas entri QBot saja
   chip project, titik animasi saat **task diterima**, centang + durasi saat
   **task selesai**, dan bar hitung mundur. Pill kecil menampilkan logo tiap agent
   dengan cincin warna status (biru bekerja, oranye butuh izin, hijau selesai).
-- Tab **Status** → kartu *Agent Coding*: daftar sesi dan langkah terakhirnya.
+- Tab **Agent** → kartu *Agent Coding*: semua sesi dan langkah terakhirnya.
 - Hook/plugin tidak pernah menahan agent: timeout 0,4 dtk, error ditelan,
   selalu sukses walau QBot mati. Izin tetap dijawab di terminal.
 - Logo ada di `linux-app/assets/` (diambil dari tema ikon lokal).

@@ -44,7 +44,36 @@ PanelWindow {
     // Preferensi pengguna, tersimpan di ~/.config/hermes-coucou/settings.json
     // (bertahan setelah restart, tidak seperti PersistentProperties).
     property bool settingsReady: false
-    readonly property var tabKeys: ["notes", "status", "usage", "tools", "projects", "dev", "interview"]
+    // Tab dikelompokkan supaya navigasi muat di island; Interview berdiri sendiri.
+    readonly property var tabGroups: [
+        {key: "agent", label: "Agent", tabs: [{key: "agent", label: "Agent"}]},
+        {key: "work", label: "Kerja", tabs: [{key: "projects", label: "Projects"}, {key: "dev", label: "Dev Server"}]},
+        {key: "system", label: "Sistem", tabs: [{key: "status", label: "Status"}, {key: "usage", label: "9Router"}, {key: "tools", label: "Tools"}]},
+        {key: "notes", label: "Catatan", tabs: [{key: "notes", label: "Catatan"}]}
+    ]
+    readonly property var tabKeys: ["agent", "projects", "dev", "status", "usage", "tools", "notes", "interview"]
+    property var lastTabInGroup: ({})        // sub-tab terakhir per grup
+    readonly property var subTabs: {
+        let g = groupOf(activeTab);
+        for (let i = 0; i < tabGroups.length; i++) {
+            if (tabGroups[i].key === g) return tabGroups[i].tabs;
+        }
+        return [];
+    }
+
+    function groupOf(tab) {
+        for (let i = 0; i < tabGroups.length; i++) {
+            for (let j = 0; j < tabGroups[i].tabs.length; j++) {
+                if (tabGroups[i].tabs[j].key === tab) return tabGroups[i].key;
+            }
+        }
+        return "";
+    }
+
+    function selectGroup(index) {
+        let g = tabGroups[index];
+        selectTab(lastTabInGroup[g.key] || g.tabs[0].key);
+    }
 
     FileView {
         id: settingsFile
@@ -108,6 +137,8 @@ PanelWindow {
     // Pindah tab + muat data tab itu (dipakai klik, keyboard, dan IPC).
     function selectTab(key) {
         activeTab = key;
+        let g = groupOf(key);
+        if (g) lastTabInGroup[g] = key;
         if (key === "notes") fetchNotesProcess.running = true;
         else if (key === "status") fetchSysInfoProcess.running = true;
         else if (key === "usage") fetchUsageProcess.running = true;
@@ -127,7 +158,7 @@ PanelWindow {
 
     // Keyboard: kartu izin (Y/Enter izinkan, N tolak, A selalu, T terminal),
     // pertanyaan (1-9 pilih, Enter lanjut, Backspace kembali), approval Hermes
-    // (Y/N), dan panel (1-7 / ←→ / Tab pindah tab, Esc tutup).
+    // (Y/N), dan panel (1-4 grup, 5 Interview, ←→ / Tab pindah tab, Esc tutup).
     function handleKey(event) {
         let k = event.key;
         if (notifyType === "approval") {
@@ -153,7 +184,8 @@ PanelWindow {
             }
         } else if (islandExpanded && !isNotifying) {
             if (k === Qt.Key_Escape) { kbdMode = false; islandExpanded = false; }
-            else if (k >= Qt.Key_1 && k < Qt.Key_1 + tabKeys.length) selectTab(tabKeys[k - Qt.Key_1]);
+            else if (k >= Qt.Key_1 && k < Qt.Key_1 + tabGroups.length) selectGroup(k - Qt.Key_1);
+            else if (k === Qt.Key_1 + tabGroups.length) selectTab("interview");
             else if (k === Qt.Key_Right || k === Qt.Key_Tab) cycleTab(1);
             else if (k === Qt.Key_Left || k === Qt.Key_Backtab) cycleTab(-1);
             else return;
@@ -2595,60 +2627,82 @@ PanelWindow {
                     Layout.fillHeight: true
                     spacing: 8
 
-                    // Navigasi Tab
-                    Row {
-                        spacing: 6
+                    // Navigasi: 4 grup + sub-tab grup aktif sebaris, Interview di kanan.
+                    RowLayout {
                         Layout.fillWidth: true
+                        spacing: 4
+
+                        Repeater {
+                            model: root.tabGroups
+                            Rectangle {
+                                id: groupBtn
+                                required property var modelData
+                                required property int index
+                                readonly property bool active: root.groupOf(root.activeTab) === modelData.key
+                                implicitWidth: groupTxt.implicitWidth + 14
+                                implicitHeight: 26
+                                radius: 6
+                                color: active ? "#27272a" : (groupHover.containsMouse ? "#18181b" : "transparent")
+                                Text {
+                                    id: groupTxt
+                                    anchors.centerIn: parent
+                                    text: groupBtn.modelData.label
+                                    color: groupBtn.active ? "#fff" : "#71717a"
+                                    font.pixelSize: 11; font.bold: true
+                                }
+                                MouseArea {
+                                    id: groupHover
+                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.selectGroup(groupBtn.index)
+                                }
+                            }
+                        }
 
                         Rectangle {
-                            width: 66; height: 26; radius: 6
-                            color: root.activeTab === "notes" ? "#27272a" : "transparent"
-                            Text { anchors.centerIn: parent; text: "Catatan"; color: root.activeTab === "notes" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("notes") }
+                            visible: root.subTabs.length > 1
+                            implicitWidth: 1; implicitHeight: 14
+                            color: "#3f3f46"
+                            Layout.leftMargin: 2; Layout.rightMargin: 2
                         }
-                        Rectangle {
-                            width: 60; height: 26; radius: 6
-                            color: root.activeTab === "status" ? "#27272a" : "transparent"
-                            Text { anchors.centerIn: parent; text: "Status"; color: root.activeTab === "status" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("status") }
-                        }
-                        Rectangle {
-                            width: 66; height: 26; radius: 6
-                            color: root.activeTab === "usage" ? "#27272a" : "transparent"
-                            Text { anchors.centerIn: parent; text: "9Router"; color: root.activeTab === "usage" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("usage") }
-                        }
-                        Rectangle {
-                            width: 54; height: 26; radius: 6
-                            color: root.activeTab === "tools" ? "#27272a" : "transparent"
-                            Text { anchors.centerIn: parent; text: "Tools"; color: root.activeTab === "tools" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("tools") }
-                        }
-                        Rectangle {
-                            width: 68; height: 26; radius: 6
-                            color: root.activeTab === "projects" ? "#27272a" : "transparent"
-                            Text { anchors.centerIn: parent; text: "Projects"; color: root.activeTab === "projects" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.selectTab("projects")
+
+                        Repeater {
+                            model: root.subTabs.length > 1 ? root.subTabs : []
+                            Rectangle {
+                                id: subBtn
+                                required property var modelData
+                                readonly property bool active: root.activeTab === modelData.key
+                                implicitWidth: subTxt.implicitWidth + 14
+                                implicitHeight: 20
+                                radius: 10
+                                color: active ? "#0c4a6e" : "transparent"
+                                border.color: active ? "#0369a1" : "#27272a"
+                                Text {
+                                    id: subTxt
+                                    anchors.centerIn: parent
+                                    text: subBtn.modelData.label
+                                    color: subBtn.active ? "#e0f2fe" : "#71717a"
+                                    font.pixelSize: 9; font.bold: true
+                                }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.selectTab(subBtn.modelData.key)
+                                }
                             }
                         }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Interview: mode khusus; bingkai + titik merah saat merekam.
                         Rectangle {
-                            id: devTabBtn
-                            width: 44; height: 26; radius: 6
-                            color: root.activeTab === "dev" ? "#27272a" : "transparent"
-                            Text { anchors.centerIn: parent; text: "Dev"; color: root.activeTab === "dev" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.selectTab("dev")
-                            }
-                        }
-                        Rectangle {
-                            width: 72; height: 26; radius: 6
-                            color: root.activeTab === "interview" ? "#27272a" : "transparent"
+                            id: ivNavBtn
+                            readonly property bool active: root.activeTab === "interview"
+                            implicitWidth: ivNavRow.implicitWidth + 14
+                            implicitHeight: 26
+                            radius: 6
+                            color: active ? "#27272a" : (ivNavHover.containsMouse ? "#18181b" : "transparent")
+                            border.color: root.interviewRunning ? "#ef4444" : "transparent"
                             Row {
+                                id: ivNavRow
                                 anchors.centerIn: parent
                                 spacing: 4
                                 Rectangle {
@@ -2657,11 +2711,11 @@ PanelWindow {
                                     width: 6; height: 6; radius: 3
                                     color: "#ef4444"
                                 }
-                                Text { text: "Interview"; color: root.activeTab === "interview" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
+                                Text { text: "Interview"; color: ivNavBtn.active ? "#fff" : "#71717a"; font.pixelSize: 10; font.bold: true }
                             }
                             MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
+                                id: ivNavHover
+                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                 onClicked: root.selectTab("interview")
                             }
                         }
@@ -3119,15 +3173,15 @@ PanelWindow {
                     }
                 }
 
-                // TAB 2: STATUS (HERMES AGENT & SYSTEM MONITOR)
+                // TAB AGENT: status Hermes + semua sesi Claude Code / OpenCode
                 ColumnLayout {
-                    visible: root.activeTab === "status"
+                    visible: root.activeTab === "agent"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.alignment: Qt.AlignTop
                     spacing: 8
 
-                    // Kartu 1: Status Agent Hermes
+                    // Kartu: Status Agent Hermes
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: statusAgentCol.implicitHeight + 20
@@ -3204,7 +3258,7 @@ PanelWindow {
                             }
 
                             Repeater {
-                                model: root.agentSessions.slice(0, 3)
+                                model: root.agentSessions
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 6
@@ -3244,6 +3298,20 @@ PanelWindow {
                         }
                     }
 
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
+                }
+
+                // TAB 2: STATUS (SYSTEM MONITOR)
+                ColumnLayout {
+                    visible: root.activeTab === "status"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: 8
+
                     // Section Title: System Hardware & Resource
                     Text {
                         text: "RESOURCE SISTEM (ARCH LINUX)"
@@ -3257,6 +3325,28 @@ PanelWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 6
+
+                        // CPU Usage Card
+                        Rectangle {
+                            Layout.fillWidth: true; height: 50; radius: 8; color: "#18181b"; border.color: "#27272a"
+                            ColumnLayout {
+                                anchors.fill: parent; anchors.margins: 8; spacing: 4
+                                RowLayout {
+                                    Text { text: "CPU"; color: "#71717a"; font.pixelSize: 9 }
+                                    Item { Layout.fillWidth: true }
+                                    Text { text: root.sysCpu + "%"; color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"; font.pixelSize: 10; font.bold: true }
+                                }
+                                Rectangle {
+                                    Layout.fillWidth: true; height: 4; radius: 2; color: "#27272a"
+                                    Rectangle {
+                                        width: parent.width * Math.min(1, root.sysCpu / 100.0)
+                                        height: parent.height; radius: 2
+                                        color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"
+                                    }
+                                }
+                                Text { text: root.sysProcesses + " proses"; color: "#a1a1aa"; font.pixelSize: 9 }
+                            }
+                        }
 
                         // RAM Usage Card
                         Rectangle {
@@ -3288,7 +3378,7 @@ PanelWindow {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 2
                                 Text { text: "System Uptime"; color: "#71717a"; font.pixelSize: 9 }
                                 Text { text: root.sysUptime; color: "#22c55e"; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                Text { text: root.sysProcesses + " proses · " + root.sysKernel; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: root.sysKernel; color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
                             }
                         }
                     }
