@@ -1,0 +1,14 @@
+{
+  "name": "hermes-coucou-linux",
+  "version": "1.0.0",
+  "description": "Coucou (Mochi) Dynamic Island Companion for Hermes Agent on Linux (Niri / Wayland)",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "electron electron-main.js",
+    "build": "vite build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
+}
