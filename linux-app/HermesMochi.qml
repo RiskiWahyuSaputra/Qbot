@@ -102,6 +102,35 @@ PanelWindow {
             property string theme: "zinc"
             property bool sound: true
             property bool autoSafe: false     // auto-izinkan perintah baca-saja (opt-in)
+            property string ntfyUrl: ""       // mis. https://ntfy.sh/topik-rahasia; kosong = mati
+            property int ntfyDelay: 60        // detik menunggu sebelum dikirim ke HP
+        }
+    }
+
+    // Izin yang menunggu > ntfyDelay dtk dikirim ke HP lewat ntfy. Hanya agent + project,
+    // tanpa isi perintah (bisa memuat token), karena topik ntfy.sh bersifat publik.
+    property string remoteNotifyKey: ""
+
+    function armRemoteNotify(key) {
+        remoteNotifyKey = key;
+        if (settings.ntfyUrl) remoteNotifyTimer.restart();
+    }
+
+    Timer {
+        id: remoteNotifyTimer
+        interval: Math.max(5, settings.ntfyDelay) * 1000
+        onTriggered: {
+            let key = "";
+            if (root.notifyType === "approval" && root.approvalActionable) key = "hermes:" + root.pendingRequestId;
+            else if (root.notifyType === "request" && root.currentRequest) key = root.currentRequest.request_id;
+            if (!key || key !== root.remoteNotifyKey || !/^https?:\/\//.test(settings.ntfyUrl)) return;
+            let agent = root.notifySource ? root.agentName(root.notifySource) : "Agent";
+            let what = root.notifyType === "request" && root.currentRequest && root.currentRequest.kind === "question" ? "bertanya" : "butuh izin";
+            Quickshell.execDetached(["curl", "-fsS", "-m", "10", "-H", "Title: QBot: " + agent + " " + what,
+                                     "-H", "Tags: robot,hourglass", "-H", "Priority: high",
+                                     "-d", (root.notifyProject ? "Project " + root.notifyProject + " · " : "")
+                                           + "menunggu jawaban " + Math.round(interval / 1000) + " dtk. Jawab di island atau terminal.",
+                                     settings.ntfyUrl]);
         }
     }
 
@@ -269,6 +298,17 @@ PanelWindow {
         }
         function autosafe(on: bool): void {
             settings.autoSafe = on;
+        }
+        // URL topik ntfy (https://ntfy.sh/<topik> atau server sendiri); "" = mati.
+        function ntfy(url: string): string {
+            if (url !== "" && !/^https?:\/\/\S+$/.test(url)) return "URL harus diawali http:// atau https://";
+            settings.ntfyUrl = url;
+            return url ? "ok, notifikasi HP aktif" : "ok, notifikasi HP mati";
+        }
+        function ntfydelay(seconds: int): string {
+            if (seconds < 5 || seconds > 3600) return "jeda harus 5-3600 detik";
+            settings.ntfyDelay = seconds;
+            return "ok";
         }
         function theme(name: string): string {
             if (!root.themePresets[name]) return "tema tidak dikenal: " + name + " (" + root.themeNames.join(", ") + ")";
@@ -673,6 +713,7 @@ PanelWindow {
             requestCustomInput.text = "";
             notifyPopAnim.restart();
             playSound("request");
+            armRemoteNotify(req.request_id);
         }
         taskStartNotifyTimer.stop();
         completionCollapseTimer.stop();
@@ -945,6 +986,7 @@ PanelWindow {
                 root.approvalActionable = true;
                 root.decisionPending = false;
                 root.approvalDetail = msg.message || (msg.tool_name ? "Tool: " + msg.tool_name : "Action needs approval");
+                root.armRemoteNotify("hermes:" + msg.request_id);
                 root.showNotification("approval", {source: "hermes", title: "Approval Required",
                     detail: root.approvalDetail,
                     color: "#eab308", expression: "angry"});

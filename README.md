@@ -155,6 +155,23 @@ python3 linux-app/agent_hooks_install.py --uninstall  # lepas entri QBot saja
   selalu sukses walau QBot mati. Izin tetap dijawab di terminal.
 - Logo ada di `linux-app/assets/` (diambil dari tema ikon lokal).
 
+### Notifikasi ke HP (ntfy, opsional)
+
+Bila izin/pertanyaan dibiarkan menunggu, QBot bisa mengirim notifikasi ke HP
+lewat [ntfy](https://ntfy.sh). Pasang aplikasi ntfy, langganan topik yang sulit
+ditebak, lalu:
+
+```bash
+qs -p $QBOT ipc call qbot ntfy https://ntfy.sh/qbot-<topik-acak-anda>
+qs -p $QBOT ipc call qbot ntfydelay 60   # detik menunggu sebelum dikirim (default 60)
+qs -p $QBOT ipc call qbot ntfy ""         # matikan
+```
+
+Isi notifikasi hanya nama agent dan project, **tanpa isi perintah** (bisa memuat
+token), karena topik di ntfy.sh publik bagi siapa pun yang tahu namanya. Notifikasi
+tidak punya tombol Izinkan/Tolak: bridge sengaja hanya mendengarkan di
+`127.0.0.1`, jadi jawabannya tetap dari island atau terminal.
+
 ### Auto-izin perintah aman (opsional, default Off)
 
 Tombol **Auto-izin aman** di kartu Agent Coding (atau `qbot autosafe true`)
