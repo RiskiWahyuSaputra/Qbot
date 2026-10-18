@@ -26,6 +26,7 @@ backend integrasi **Hermes Agent**.
 - **Status agent coding** — sesi Claude Code dan OpenCode: bekerja, butuh izin, selesai.
 - **Jawab izin & pertanyaan** agent langsung dari island.
 - **Interview Assist** — transkrip lokal (faster-whisper) + saran jawaban dari LLM.
+- **Efek suara** — bunyi saat izin masuk, task selesai, atau gagal (Sistem → Tools untuk mematikan).
 - **5 tema** — Zinc, Catppuccin, Tokyo Night, Gruvbox, Nord (tombol ◐ di panel kiri).
 - **Panel 4 grup** — Agent (Hermes + sesi coding), Kerja (Projects, Dev Server),
   Sistem (CPU/RAM, 9Router, Tools), Catatan; plus mode Interview.
@@ -62,6 +63,7 @@ Opsional / fitur:
 - `wl-clipboard` — salin catatan
 - `grim` + `slurp` — tombol screenshot
 - `lsof`, `pgrep` — deteksi proses Hermes
+- `pipewire` (`pw-play`) — efek suara notifikasi
 
 ## Cara Menjalankan
 
@@ -90,6 +92,7 @@ qs -p $QBOT ipc call qbot close
 qs -p $QBOT ipc call qbot tab status    # buka langsung ke tab tertentu
 # tab: agent, projects, dev, status, usage, tools, notes, interview
 qs -p $QBOT ipc call qbot theme nord     # zinc, catppuccin, tokyonight, gruvbox, nord
+qs -p $QBOT ipc call qbot sound false    # matikan efek suara
 ```
 
 Contoh keybind Niri (`~/.config/niri/config.kdl`, di dalam `binds { }`):

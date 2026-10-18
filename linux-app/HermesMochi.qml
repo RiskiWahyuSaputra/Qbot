@@ -96,7 +96,14 @@ PanelWindow {
             property string avatar: "white"
             property string tab: "notes"
             property string theme: "zinc"
+            property bool sound: true
         }
+    }
+
+    // Efek suara (assets/sounds, dibuat oleh scripts/gen-sounds.py) lewat PipeWire.
+    function playSound(name) {
+        if (!settings.sound) return;
+        Quickshell.execDetached(["pw-play", appDir + "assets/sounds/" + name + ".wav"]);
     }
 
     // Palet netral + aksen. Warna status (hijau selesai, merah gagal, oranye
@@ -154,6 +161,9 @@ PanelWindow {
             open();
             root.selectTab(name);
             return "ok";
+        }
+        function sound(on: bool): void {
+            settings.sound = on;
         }
         function theme(name: string): string {
             if (!root.themePresets[name]) return "tema tidak dikenal: " + name + " (" + root.themeNames.join(", ") + ")";
@@ -499,6 +509,9 @@ PanelWindow {
     // island yang sedang dibuka pengguna tidak direbut (status saja yang berubah).
     function showNotification(type, opts) {
         if ((notifyType === "approval" || notifyType === "request") && type !== "approval") return;
+        if (type === "done") playSound(opts.error ? "error" : "done");
+        else if (type === "approval" || type === "agent_wait") playSound("request");
+        else if (type === "task_start" || type === "interview") playSound("pop");
         currentStatus = opts.title;
         activeDetail = opts.detail || "";
         statusColor = opts.color;
@@ -551,6 +564,7 @@ PanelWindow {
             reqError = "";
             requestCustomInput.text = "";
             notifyPopAnim.restart();
+            playSound("request");
         }
         taskStartNotifyTimer.stop();
         completionCollapseTimer.stop();
@@ -3879,6 +3893,35 @@ PanelWindow {
                                     anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                     onClicked: {
                                         root.launchTool("volume_up");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Suara notifikasi QBot (izin masuk, task selesai/gagal)
+                    Rectangle {
+                        Layout.fillWidth: true; height: 34; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
+                        RowLayout {
+                            anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 8; spacing: 8
+                            Text { text: settings.sound ? "🔔" : "🔕"; font.pixelSize: 12 }
+                            Text { text: "Suara notifikasi QBot"; color: root.theme.text; font.pixelSize: 11; font.bold: true }
+                            Item { Layout.fillWidth: true }
+                            Rectangle {
+                                width: 44; height: 22; radius: 6
+                                color: settings.sound ? "#052e16" : root.theme.surface0
+                                border.color: settings.sound ? "#22c55e" : root.theme.surface2
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: settings.sound ? "On" : "Off"
+                                    color: settings.sound ? "#86efac" : root.theme.subtext0
+                                    font.pixelSize: 10; font.bold: true
+                                }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        settings.sound = !settings.sound;
+                                        root.playSound("pop");
                                     }
                                 }
                             }
