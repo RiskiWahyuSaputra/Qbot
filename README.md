@@ -96,6 +96,20 @@ Mod+Space { spawn "qs" "-p" "/path/ke/Qbot/linux-app/HermesMochi.qml" "ipc" "cal
 
 Island yang dibuka lewat hotkey langsung menerima keyboard; `Esc` menutupnya.
 
+| Tombol | Di panel | Di kartu izin | Di kartu pertanyaan |
+|---|---|---|---|
+| `1`–`7` | pindah tab | – | pilih opsi |
+| `←` `→` / `Tab` | tab sebelumnya/berikutnya | – | – |
+| `Y` / `Enter` | – | Izinkan | `Enter` = Lanjut/Kirim |
+| `N` | – | Tolak | – |
+| `A` | – | Selalu izinkan (bila ditawarkan) | – |
+| `T` | – | Jawab di terminal | Jawab di terminal |
+| `Backspace` | – | – | pertanyaan sebelumnya |
+| `Esc` | tutup island | lepas fokus | lepas fokus |
+
+Kartu yang muncul sendiri menerima keyboard setelah diklik sekali, atau
+langsung bila dibuka dengan `qbot open`.
+
 ## Approval Hermes
 
 - Request approval **asli** datang dari WebSocket Hermes, punya

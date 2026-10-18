@@ -99,11 +99,71 @@ PanelWindow {
         }
         function tab(name: string): string {
             if (root.tabKeys.indexOf(name) < 0) return "tab tidak dikenal: " + name + " (" + root.tabKeys.join(", ") + ")";
-            root.activeTab = name;
             open();
+            root.selectTab(name);
             return "ok";
         }
     }
+
+    // Pindah tab + muat data tab itu (dipakai klik, keyboard, dan IPC).
+    function selectTab(key) {
+        activeTab = key;
+        if (key === "notes") fetchNotesProcess.running = true;
+        else if (key === "status") fetchSysInfoProcess.running = true;
+        else if (key === "usage") fetchUsageProcess.running = true;
+        else if (key === "projects") fetchProjectsProcess.running = true;
+        else if (key === "dev") sendBridgeCommand({ action: "dev_status" });
+        else if (key === "interview") sendBridgeCommand({ action: "interview_status" });
+    }
+
+    function cycleTab(step) {
+        let n = tabKeys.length;
+        selectTab(tabKeys[(tabKeys.indexOf(activeTab) + step + n) % n]);
+    }
+
+    function isEnter(key) {
+        return key === Qt.Key_Return || key === Qt.Key_Enter;
+    }
+
+    // Keyboard: kartu izin (Y/Enter izinkan, N tolak, A selalu, T terminal),
+    // pertanyaan (1-9 pilih, Enter lanjut, Backspace kembali), approval Hermes
+    // (Y/N), dan panel (1-7 / ←→ / Tab pindah tab, Esc tutup).
+    function handleKey(event) {
+        let k = event.key;
+        if (notifyType === "approval") {
+            if (k === Qt.Key_Y || isEnter(k)) submitDecision("allow");
+            else if (k === Qt.Key_N) submitDecision("deny");
+            else if (k === Qt.Key_Escape) kbdMode = false;
+            else return;
+        } else if (notifyType === "request" && currentRequest) {
+            if (reqSending) { event.accepted = true; return; }
+            if (k === Qt.Key_Escape) kbdMode = false;
+            else if (k === Qt.Key_T) submitRequestAnswer({decision: "terminal"});
+            else if (currentRequest.kind === "permission") {
+                if (k === Qt.Key_Y || isEnter(k)) submitRequestAnswer({decision: "allow"});
+                else if (k === Qt.Key_N) submitRequestAnswer({decision: "deny"});
+                else if (k === Qt.Key_A && currentRequest.can_always) submitRequestAnswer({decision: "always"});
+                else return;
+            } else {
+                let q = currentRequest.questions[reqIndex];
+                if (k >= Qt.Key_1 && k <= Qt.Key_9 && q && k - Qt.Key_1 < q.options.length) reqToggleOption(q.options[k - Qt.Key_1].label);
+                else if (isEnter(k)) reqAdvance();
+                else if (k === Qt.Key_Backspace && reqIndex > 0) reqIndex -= 1;
+                else return;
+            }
+        } else if (islandExpanded && !isNotifying) {
+            if (k === Qt.Key_Escape) { kbdMode = false; islandExpanded = false; }
+            else if (k >= Qt.Key_1 && k < Qt.Key_1 + tabKeys.length) selectTab(tabKeys[k - Qt.Key_1]);
+            else if (k === Qt.Key_Right || k === Qt.Key_Tab) cycleTab(1);
+            else if (k === Qt.Key_Left || k === Qt.Key_Backtab) cycleTab(-1);
+            else return;
+        } else {
+            return;
+        }
+        event.accepted = true;
+    }
+
+    onKbdModeChanged: if (kbdMode) islandCapsule.forceActiveFocus()
 
     // Status
     property string currentStatus: "Standby"
@@ -1291,6 +1351,10 @@ PanelWindow {
             return 44;
         }
 
+        // Penerima tombol: event yang tidak dipakai TextField anak naik ke sini.
+        focus: true
+        Keys.onPressed: event => root.handleKey(event)
+
         topLeftRadius: 0
         topRightRadius: 0
         bottomLeftRadius: (root.islandExpanded && !root.isNotifying) ? 26 : 22
@@ -2037,6 +2101,15 @@ PanelWindow {
                     }
 
                     Text {
+                        visible: islandCapsule.activeFocus && !root.reqSending
+                        text: requestCard.isPerm
+                              ? "⌨ Y izinkan · N tolak" + (requestCard.req && requestCard.req.can_always ? " · A selalu" : "") + " · T terminal"
+                              : "⌨ 1-9 pilih · Enter lanjut · T terminal"
+                        color: "#52525b"
+                        font.pixelSize: 9
+                    }
+
+                    Text {
                         visible: root.reqSending
                         text: "Mengirim…"
                         color: "#38bdf8"
@@ -2531,25 +2604,25 @@ PanelWindow {
                             width: 66; height: 26; radius: 6
                             color: root.activeTab === "notes" ? "#27272a" : "transparent"
                             Text { anchors.centerIn: parent; text: "Catatan"; color: root.activeTab === "notes" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.activeTab = "notes"; fetchNotesProcess.running = true } }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("notes") }
                         }
                         Rectangle {
                             width: 60; height: 26; radius: 6
                             color: root.activeTab === "status" ? "#27272a" : "transparent"
                             Text { anchors.centerIn: parent; text: "Status"; color: root.activeTab === "status" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.activeTab = "status"; fetchSysInfoProcess.running = true } }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("status") }
                         }
                         Rectangle {
                             width: 66; height: 26; radius: 6
                             color: root.activeTab === "usage" ? "#27272a" : "transparent"
                             Text { anchors.centerIn: parent; text: "9Router"; color: root.activeTab === "usage" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.activeTab = "usage"; fetchUsageProcess.running = true } }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("usage") }
                         }
                         Rectangle {
                             width: 54; height: 26; radius: 6
                             color: root.activeTab === "tools" ? "#27272a" : "transparent"
                             Text { anchors.centerIn: parent; text: "Tools"; color: root.activeTab === "tools" ? "#fff" : "#71717a"; font.pixelSize: 11; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.activeTab = "tools" }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectTab("tools") }
                         }
                         Rectangle {
                             width: 68; height: 26; radius: 6
@@ -2558,10 +2631,7 @@ PanelWindow {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    root.activeTab = "projects";
-                                    fetchProjectsProcess.running = true;
-                                }
+                                onClicked: root.selectTab("projects")
                             }
                         }
                         Rectangle {
@@ -2572,10 +2642,7 @@ PanelWindow {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    root.activeTab = "dev";
-                                    sendBridgeCommand({ action: "dev_status" });
-                                }
+                                onClicked: root.selectTab("dev")
                             }
                         }
                         Rectangle {
@@ -2595,10 +2662,7 @@ PanelWindow {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    root.activeTab = "interview";
-                                    sendBridgeCommand({ action: "interview_status" });
-                                }
+                                onClicked: root.selectTab("interview")
                             }
                         }
                     }
@@ -3009,7 +3073,7 @@ PanelWindow {
                                     font.family: notesTabCol.selectedTag === "cmd" ? "JetBrains Mono, monospace" : "Inter, sans-serif"
                                     background: null
                                     Keys.onEscapePressed: event => {
-                                        noteInput.focus = false;
+                                        islandCapsule.forceActiveFocus(); // Esc berikutnya menutup island
                                         event.accepted = true;
                                     }
                                     onAccepted: {
