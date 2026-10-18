@@ -61,14 +61,14 @@ def build(hook):
     return None
 
 
-def ask_island(hook, kind, title, detail, questions=None, can_always=False):
+def ask_island(hook, kind, title, detail, questions=None, can_always=False, command=""):
     from bridge_client import request
     cwd = str(hook.get("cwd") or "")
     result = request("POST", "/agent/request", {
         "agent": "claude", "kind": kind, "request_id": os.urandom(8).hex(),
         "session_id": str(hook.get("session_id") or ""),
         "project": os.path.basename(cwd.rstrip("/")) or cwd,
-        "title": title, "detail": detail, "questions": questions, "can_always": can_always,
+        "title": title, "detail": detail, "questions": questions, "can_always": can_always, "command": command,
         "timeout": WAIT,
     }, timeout=WAIT + 10)
     if not isinstance(result, dict) or result.get("status") != "answered":
@@ -102,8 +102,9 @@ def interactive(hook):
         detail = tool_summary(tool, tool_input)
         if tool_input.get("command") and tool_input.get("description"):
             detail = tool + ": " + str(tool_input["command"])
+        command = tool_input.get("command") if tool == "Bash" and isinstance(tool_input.get("command"), str) else ""
         answer = ask_island(hook, "permission", "Izinkan " + (tool or "tool") + "?", detail[:2000],
-                            can_always=bool(suggestions))
+                            can_always=bool(suggestions), command=command)
         if not answer:
             return None
         if answer.get("decision") == "deny":

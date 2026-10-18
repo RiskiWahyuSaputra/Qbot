@@ -29,6 +29,13 @@ class InteractiveHookTests(unittest.TestCase):
         out, _ = self.run_with(self.PERM, {"decision": "deny"})
         self.assertEqual(out["hookSpecificOutput"]["decision"]["behavior"], "deny")
 
+    def test_full_command_sent_only_for_bash(self):
+        long_cmd = "ls " + "a" * 3000
+        _, ask = self.run_with({**self.PERM, "tool_input": {"command": long_cmd, "description": "List"}}, None)
+        self.assertEqual(ask.call_args.kwargs["command"], long_cmd)
+        _, ask = self.run_with({**self.PERM, "tool_name": "Write", "tool_input": {"command": "ls", "file_path": "/x"}}, None)
+        self.assertEqual(ask.call_args.kwargs["command"], "")
+
     def test_question_answers_fill_updated_input(self):
         out, _ = self.run_with(self.ASK, {"answers": [["Vue"], ["A", "B"]]})
         spec = out["hookSpecificOutput"]

@@ -418,6 +418,18 @@ class AgentRequestTests(RuntimeCase):
         self.assertEqual(closed, ["timeout", "cancelled"])
         self.assertEqual(self.runtime.agent_requests, {})
 
+    def test_permission_command_passed_whole_or_dropped(self):
+        perm = {**self.QUESTION, "kind": "permission", "questions": None, "command": "git status"}
+        for command, shown in (("git status", "git status"), ("x" * 4001, ""), (["ls"], "")):
+            worker, _ = self.open_async({**perm, "command": command})
+            self.assertEqual([e for e in self.events() if e["event"] == "AgentRequest"][-1]["command"], shown)
+            self.runtime.close_request("claude:q1", "cancelled")
+            worker.join(2)
+        worker, _ = self.open_async(self.QUESTION | {"command": "ls"})
+        self.assertEqual([e for e in self.events() if e["event"] == "AgentRequest"][-1]["command"], "")
+        self.runtime.close_request("claude:q1", "cancelled")
+        worker.join(2)
+
     def test_bad_requests_rejected(self):
         for bad in ({**self.QUESTION, "agent": "x"}, {**self.QUESTION, "kind": "x"},
                     {**self.QUESTION, "questions": []}, {**self.QUESTION, "timeout": 9999},

@@ -126,7 +126,8 @@ export const CoucouPlugin = async (ctx) => {
           const detail = p.metadata?.command || (p.patterns || []).join(", ") || p.permission;
           askIsland(
             { kind: "permission", request_id: p.id, session_id: p.sessionID, title: `Izinkan ${p.permission}?`,
-              detail: `${p.permission}: ${short(detail, 600)}`, can_always: (p.always || []).length > 0 },
+              detail: `${p.permission}: ${short(detail, 600)}`, can_always: (p.always || []).length > 0,
+              command: p.permission === "bash" && typeof p.metadata?.command === "string" ? p.metadata.command : "" },
             (answer) => opencodePost(ctx, "/permission/{requestID}/reply", { requestID: p.id }, {
               reply: { allow: "once", always: "always", deny: "reject" }[answer.decision] || "reject",
             }),

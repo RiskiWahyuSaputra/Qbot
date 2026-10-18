@@ -154,6 +154,20 @@ python3 linux-app/agent_hooks_install.py --uninstall  # lepas entri QBot saja
   selalu sukses walau QBot mati. Izin tetap dijawab di terminal.
 - Logo ada di `linux-app/assets/` (diambil dari tema ikon lokal).
 
+### Auto-izin perintah aman (opsional, default Off)
+
+Tombol **Auto-izin aman** di kartu Agent Coding (atau `qbot autosafe true`)
+membuat izin Bash diizinkan otomatis **hanya** untuk perintah baca-saja:
+`git status/diff/log/show`, `ls`, `pwd`, `cat`, `head`, `tail`, `wc`, `grep`,
+`rg`, `find`, `du`, `df`, `which`, `stat`.
+
+Perintah ditolak dari auto-izin (tetap ditanyakan) bila mengandung operator shell
+(`; & | $ \` < > ( ) { }`), tanda kutip, backslash, baris baru, atau opsi yang
+menulis/menjalankan program (`find -exec/-delete`, `rg --pre`, `git --output`).
+Pemeriksaan memakai perintah utuh dari hook, bukan teks tampilan yang terpotong;
+perintah lebih dari 4000 karakter selalu ditanyakan. Setiap auto-izin tercatat di
+Riwayat.
+
 ### Menjawab izin & pertanyaan dari island
 
 Saat agent minta izin menjalankan sesuatu, atau mengajukan pertanyaan pilihan,

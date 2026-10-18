@@ -35,6 +35,7 @@ EVENTS = {"TaskStarted", "PreToolUse", "PostToolUse", "StopSuccess", "Permission
 AGENT_EVENTS = {"AgentSessionStart", "AgentPrompt", "AgentToolStart", "AgentToolDone",
                 "AgentWaiting", "AgentStop", "AgentSessionEnd"}
 AGENTS = {"claude", "opencode"}
+MAX_COMMAND = 4000
 MAX_AGENT_REQUESTS = 6      # long-poll memakai slot thread HTTP (16 total)
 MAX_REQUEST_WAIT = 600
 
@@ -469,6 +470,10 @@ class BridgeRuntime:
                 "title": _text(data.get("title"), 300), "detail": _text(data.get("detail"), 2000),
                 "can_always": bool(data.get("can_always")),
                 "questions": normalize_questions(data.get("questions")) if kind == "question" else []}
+        # Perintah shell utuh untuk aturan auto-izin di island. Tidak pernah dipotong:
+        # perintah yang terlalu panjang dikosongkan sehingga selalu ditanyakan manual.
+        command = data.get("command")
+        info["command"] = command if kind == "permission" and isinstance(command, str) and len(command) <= MAX_COMMAND else ""
         wait = data.get("timeout", 120)
         if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not 1 <= wait <= MAX_REQUEST_WAIT:
             raise ValueError("timeout must be 1-600 seconds")

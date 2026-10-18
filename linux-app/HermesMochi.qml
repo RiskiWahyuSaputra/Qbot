@@ -78,6 +78,7 @@ PanelWindow {
     FileView {
         id: settingsFile
         path: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/hermes-coucou/settings.json"
+        printErrors: false // file belum ada saat pertama jalan: ditangani onLoadFailed
         onAdapterUpdated: if (root.settingsReady) settingsWriteTimer.restart()
         onLoaded: {
             if (root.tabKeys.indexOf(settings.tab) >= 0) root.activeTab = settings.tab;
@@ -97,16 +98,45 @@ PanelWindow {
             property string tab: "notes"
             property string theme: "zinc"
             property bool sound: true
+            property bool autoSafe: false     // auto-izinkan perintah baca-saja (opt-in)
         }
+    }
+
+    // Perintah baca-saja yang boleh diizinkan otomatis bila autoSafe aktif.
+    // Sengaja ketat: tanpa operator shell, tanpa kutip (bisa menyamarkan opsi),
+    // dan opsi yang menulis file / menjalankan program ditolak.
+    function isSafeCommand(cmd) {
+        cmd = (cmd || "").trim();
+        if (!cmd || /[;&|`$<>(){}\\'"\n\r]/.test(cmd)) return false;
+        let t = cmd.split(/\s+/);
+        if (t[0] === "git")
+            return t.length >= 2 && ["status", "diff", "log", "show"].indexOf(t[1]) >= 0
+                && !t.some(a => /^--(output|ext-diff)/.test(a));
+        if (t[0] === "find")
+            return !t.some(a => /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/.test(a));
+        if (t[0] === "rg")
+            return !t.some(a => /^--pre/.test(a));
+        return ["ls", "pwd", "cat", "head", "tail", "wc", "grep", "du", "df", "which", "stat"].indexOf(t[0]) >= 0;
+    }
+
+    property var autoAllowPending: ({})      // id perintah bridge -> request yang diizinkan otomatis
+
+    function autoAllow(req) {
+        let id = sendBridgeCommand({action: "agent_answer", request_id: req.request_id, answer: {decision: "allow"}});
+        autoAllowPending[id] = req;
+        logActivity(req.agent, req.project, "auto", req.command);
+        showNotification("info", {source: req.agent, title: "Diizinkan otomatis", detail: req.command,
+                                  color: "#22c55e", expression: "happy", project: req.project || ""});
     }
 
     // Riwayat aktivitas agent + statistik harian, di ~/.local/share/hermes-coucou/activity.json.
     // history: [{t, agent, project, kind, text, dur}] terbaru di depan (maks 60);
-    // kind: start | done | error | allow | deny | always | answer.
+    // kind: start | done | error | allow | deny | always | auto | answer.
     // daily: {"YYYY-MM-DD": {tasks, done, errors, perms}} 14 hari terakhir.
     FileView {
         id: activityFile
         path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/hermes-coucou/activity.json"
+        printErrors: false // file belum ada saat pertama jalan: ditangani onLoadFailed
         onAdapterUpdated: activityWriteTimer.restart()
         onLoadFailed: error => {
             if (error == FileViewError.FileNotFound)
@@ -133,7 +163,7 @@ PanelWindow {
         let entry = {t: Date.now(), agent: agent || "", project: project || "", kind: kind, text: text || "", dur: dur || ""};
         activity.history = [entry].concat(activity.history || []).slice(0, 60);
 
-        let field = {start: "tasks", done: "done", error: "errors", allow: "perms", deny: "perms", always: "perms"}[kind];
+        let field = {start: "tasks", done: "done", error: "errors", allow: "perms", deny: "perms", always: "perms", auto: "perms"}[kind];
         if (!field) return;
         let daily = Object.assign({}, activity.daily || {});
         let key = dayKey(new Date());
@@ -146,12 +176,12 @@ PanelWindow {
     }
 
     function activityLabel(kind) {
-        return {start: "Task diterima", done: "Selesai", error: "Gagal", allow: "Diizinkan",
+        return {start: "Task diterima", done: "Selesai", error: "Gagal", allow: "Diizinkan", auto: "Auto-izin",
                 deny: "Ditolak", always: "Selalu diizinkan", answer: "Dijawab"}[kind] || kind;
     }
 
     function activityColor(kind) {
-        if (kind === "done" || kind === "allow" || kind === "always") return "#22c55e";
+        if (kind === "done" || kind === "allow" || kind === "always" || kind === "auto") return "#22c55e";
         if (kind === "error" || kind === "deny") return "#ef4444";
         if (kind === "start") return "#a78bfa";
         return theme.accent;
@@ -227,6 +257,9 @@ PanelWindow {
         }
         function sound(on: bool): void {
             settings.sound = on;
+        }
+        function autosafe(on: bool): void {
+            settings.autoSafe = on;
         }
         function theme(name: string): string {
             if (!root.themePresets[name]) return "tema tidak dikenal: " + name + " (" + root.themeNames.join(", ") + ")";
@@ -960,6 +993,10 @@ PanelWindow {
 
         case "AgentRequest":
             if (msg.request_id && (msg.kind === "permission" || msg.kind === "question")) {
+                if (msg.kind === "permission" && settings.autoSafe && root.isSafeCommand(msg.command)) {
+                    root.autoAllow(msg);
+                    break;
+                }
                 root.agentRequests = root.agentRequests.concat([msg]);
                 root.refreshRequestView();
             }
@@ -970,6 +1007,16 @@ PanelWindow {
             break;
 
         case "ActionResult":
+            if (msg.id && root.autoAllowPending[msg.id]) {
+                // Auto-izin gagal terkirim: tampilkan kartunya supaya dijawab manual.
+                let req = root.autoAllowPending[msg.id];
+                delete root.autoAllowPending[msg.id];
+                if (!msg.ok) {
+                    root.agentRequests = root.agentRequests.concat([req]);
+                    root.refreshRequestView();
+                }
+                break;
+            }
             if (msg.id && msg.id === root.reqAnswerCmdId) {
                 root.reqAnswerCmdId = "";
                 if (msg.ok && root.reqAnswerLog) {
@@ -3391,6 +3438,23 @@ PanelWindow {
                                 Text {
                                     text: root.agentSessions.length > 0 ? root.agentSessions.length + " sesi" : ""
                                     color: root.theme.subtext0; font.pixelSize: 9
+                                }
+                                // Auto-izinkan perintah baca-saja (git status, ls, cat, …)
+                                Rectangle {
+                                    implicitWidth: autoSafeTxt.implicitWidth + 12; implicitHeight: 18; radius: 9
+                                    color: settings.autoSafe ? "#052e16" : "transparent"
+                                    border.color: settings.autoSafe ? "#22c55e" : root.theme.surface2
+                                    Text {
+                                        id: autoSafeTxt
+                                        anchors.centerIn: parent
+                                        text: "Auto-izin aman: " + (settings.autoSafe ? "On" : "Off")
+                                        color: settings.autoSafe ? "#86efac" : root.theme.subtext0
+                                        font.pixelSize: 8; font.bold: true
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: settings.autoSafe = !settings.autoSafe
+                                    }
                                 }
                             }
 
