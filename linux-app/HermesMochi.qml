@@ -33,13 +33,48 @@ PanelWindow {
     property bool islandExpanded: false
     property bool isNotifying: false
     property string notifyType: "" // "done" | "approval"
-    property string activeTab: "notes" // Default tab Catatan
+    property string activeTab: "notes" // Default tab Catatan; dipulihkan dari settings saat dimuat
+    onActiveTabChanged: if (settingsReady) settings.tab = activeTab
+
+    // Preferensi pengguna, tersimpan di ~/.config/hermes-coucou/settings.json
+    // (bertahan setelah restart, tidak seperti PersistentProperties).
+    property bool settingsReady: false
+    readonly property var tabKeys: ["notes", "status", "usage", "tools", "projects", "dev", "interview"]
+
+    FileView {
+        id: settingsFile
+        path: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/hermes-coucou/settings.json"
+        onAdapterUpdated: if (root.settingsReady) settingsWriteTimer.restart()
+        onLoaded: {
+            if (root.tabKeys.indexOf(settings.tab) >= 0) root.activeTab = settings.tab;
+            root.settingsReady = true;
+        }
+        onLoadFailed: error => {
+            root.settingsReady = true;
+            if (error == FileViewError.FileNotFound) {
+                Quickshell.execDetached(["mkdir", "-p", path.substring(0, path.lastIndexOf("/"))]);
+                settingsWriteTimer.restart();
+            }
+        }
+
+        adapter: JsonAdapter {
+            id: settings
+            property string avatar: "white"
+            property string tab: "notes"
+        }
+    }
+
+    Timer {
+        id: settingsWriteTimer
+        interval: 400
+        onTriggered: settingsFile.writeAdapter()
+    }
 
     // Status
     property string currentStatus: "Standby"
     property string activeDetail: "Ready for tasks"
     property color statusColor: "#22c55e"
-    property string avatarModel: "white" // Default Robot Putih ("white" | "strobi" | "nova" | "citrus" | "kirby")
+    readonly property string avatarModel: settings.avatar // "white" | "strobi" | "nova" | "citrus" | "kirby"
     property string avatarExpression: "proud" // "proud" | "happy" | "working" | "celebrate" | "idle" | "angry" | "dizzy" | "wave" | "task_start"
 
     // Eye Tracking Coordinates relative to pill
@@ -2438,7 +2473,7 @@ PanelWindow {
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.avatarModel = modelData
+                                        onClicked: settings.avatar = modelData
                                     }
                                 }
                             }
