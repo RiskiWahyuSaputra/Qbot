@@ -174,6 +174,19 @@ class DevServerManagerTest(unittest.TestCase):
         self.assertTrue(self._wait_until(lambda: not self._pid_alive(pid)),
                         "proses masih hidup setelah stop oleh manager kedua")
 
+    def test_server_that_chdirs_into_public_stays_tracked(self):
+        public = self.root / "demo" / "public"
+        public.mkdir()
+        proc = subprocess.Popen(["sleep", "60"], cwd=str(public))
+        try:
+            entry = {"pid": proc.pid, "cwd": str(self.root / "demo")}
+            self.assertTrue(DevServerManager._alive(entry))
+            entry["cwd"] = str(self.root / "dem")
+            self.assertFalse(DevServerManager._alive(entry))
+        finally:
+            proc.kill()
+            proc.wait()
+
     def test_dead_pid_is_pruned_from_state(self):
         proc = subprocess.Popen(["true"])
         proc.wait()

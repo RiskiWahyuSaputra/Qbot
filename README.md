@@ -26,6 +26,8 @@ backend integrasi **Hermes Agent**.
 - **Status agent coding** — sesi Claude Code dan OpenCode: bekerja, butuh izin, selesai.
 - **Jawab izin & pertanyaan** agent langsung dari island.
 - **Interview Assist** — transkrip lokal (faster-whisper) + saran jawaban dari LLM.
+- **Perintah suara** — "halo qbot, buka chromium dan buka youtube": dikenali lokal, dijalankan, dan dibalas dengan suara.
+- **Now Playing + lirik** — saat Spotify diputar island jadi mini player (cover berputar, baris lirik aktif, visualizer); tab **Musik** berisi cover, kontrol, dan lirik tersinkron dari [LRCLIB](https://lrclib.net) (hanya judul, artis, durasi yang dikirim).
 - **Efek suara** — bunyi saat izin masuk, task selesai, atau gagal (Sistem → Tools untuk mematikan).
 - **Sapaan harian** — sekali per hari Mochi menyapa sesuai jam dengan ringkasan hari aktif terakhir.
 - **Mochi punya suasana** — berkeringat saat CPU ≥ 90%, berjoget saat musik diputar, mengantuk pukul 23.00–05.00.
@@ -38,7 +40,8 @@ backend integrasi **Hermes Agent**.
 ```
 run.sh
 └── Quickshell (layer-shell overlay) → linux-app/HermesMochi.qml
-    ├── BibleStrongAvatar.qml      karakter & animasi
+    ├── QCoreBot.qml               robot 3D Q-Core Bot (Qt Quick 3D) & animasi
+    ├── voice.py                   perintah suara "halo qbot" (dipakai bridge)
     ├── mochi_bridge.py --stdio    bridge: HTTP lokal + WebSocket Hermes
     │     stdout = event NDJSON (langsung ke QML, tanpa polling /tmp)
     │     stdin  = perintah QML (decision, launch, media, notes)
@@ -54,6 +57,7 @@ dan Tauri (`src-tauri/`) adalah jalur legacy yang tidak dipakai `run.sh`.
 Wajib:
 
 - `quickshell`
+- `qt6-quick3d` — robot 3D Q-Core Bot
 - `python` (bridge & klien)
 - `python-websockets` — **tanpa ini approval Hermes tidak tersambung**
   (`run.sh` otomatis memakai venv Hermes bila system python tidak punya)
@@ -61,7 +65,8 @@ Wajib:
 Opsional / fitur:
 
 - `python-psutil` — tab Status sistem
-- `playerctl` — panel media
+- `playerctl` — kontrol media dari perintah suara
+- `cava` — visualizer mini player saat musik diputar
 - `wl-clipboard` — salin catatan
 - `grim` + `slurp` — tombol screenshot
 - `lsof`, `pgrep` — deteksi proses Hermes
@@ -259,6 +264,39 @@ Konfigurasi (env pada proses Quickshell/`run.sh`):
 Butuh `faster-whisper`, `numpy`, `pyyaml` di python bridge (venv Hermes
 sudah punya) dan `parec` (pipewire-pulse). Rekam percakapan hanya dengan
 persetujuan pihak lain dan sesuai aturan yang berlaku.
+
+## Perintah Suara
+
+Panggil **"halo qbot"** lalu ucapkan perintah, atau langsung sekaligus:
+"halo qbot, buka chromium dan buka youtube". Mochi melambai saat dipanggil,
+berpikir saat memproses, lalu merayakan (berhasil) atau pusing (gagal), dan
+balasannya dibacakan.
+
+```
+parec (mic) -> deteksi jeda -> faster-whisper (lokal) -> wake word "qbot"
+            -> aturan lokal / LLM (hanya teks) -> aksi daftar putih -> island + TTS
+```
+
+Contoh yang dipahami tanpa LLM: "buka chromium", "buka github di firefox",
+"cari lagu lofi di youtube", "naikkan volume", "lagu berikutnya", "jeda",
+"screenshot", "jam berapa". Selain itu (obrolan, pertanyaan, kalimat bebas)
+ditafsirkan LLM Hermes. Aksi yang bisa dijalankan hanya: buka aplikasi (dari
+file `.desktop`), buka URL http/https / cari di YouTube-Google (opsional di
+browser tertentu), media, volume, dan screenshot. LLM tidak pernah
+menjalankan perintah shell.
+
+- Tombol mic di panel kiri (sebelah ◐) menyalakan/mematikan; status tersimpan.
+- Saat menyala, mikrofon terus didengarkan **di mesin ini**. Ucapan > 8 dtk tanpa
+  dipanggil diabaikan sebelum ditranskrip agar CPU tetap ringan.
+- Balasan suara: jalankan `scripts/setup-voice.sh` sekali (piper + suara
+  `id_ID-news_tts-medium` di `~/.local/share/hermes-coucou/piper`). Tanpa
+  piper dipakai `espeak-ng` bila ada, atau balasan hanya berupa teks.
+
+| Env | Default | Keterangan |
+|---|---|---|
+| `HERMES_COUCOU_VOICE_WHISPER` | `small` | `base` lebih ringan, kurang akurat |
+| `HERMES_COUCOU_VOICE_LANG` | `id` | bahasa ucapan |
+| `HERMES_COUCOU_PIPER` / `HERMES_COUCOU_PIPER_VOICE` | venv & suara di atas | piper/suara lain |
 
 ## Mengirim Event Demo ke QBot
 

@@ -77,9 +77,13 @@ class DevServerManager:
         except OSError:
             return False
         try:
-            return os.readlink("/proc/%d/cwd" % pid) == entry.get("cwd")
+            cwd = os.readlink("/proc/%d/cwd" % pid)
         except OSError:
             return False
+        # artisan serve versi lama chdir ke public/ sebelum exec php -S,
+        # jadi cwd boleh berada di dalam folder project.
+        base = entry.get("cwd")
+        return bool(base) and (cwd == base or cwd.startswith(base.rstrip("/") + "/"))
 
     def _project(self, project_id):
         if not isinstance(project_id, str) or not project_id:

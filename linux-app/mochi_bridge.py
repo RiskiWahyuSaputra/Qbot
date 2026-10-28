@@ -262,6 +262,8 @@ def main(argv=None):
         with suppress(OSError, ValueError):
             runtime.interview.stop()
         with suppress(OSError, ValueError):
+            runtime.voice.stop()
+        with suppress(OSError, ValueError):
             runtime.disconnected()
         if server is not None:
             if workers and workers[0].is_alive():

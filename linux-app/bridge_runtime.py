@@ -27,6 +27,7 @@ import uuid
 from bridge_client import MAX_BODY, runtime_directory
 from dev_servers import DevServerManager
 from interview import InterviewAssistant
+from voice import VoiceAssistant
 
 IO_TIMEOUT = 5
 RPC_TIMEOUT = 8
@@ -351,6 +352,7 @@ class BridgeRuntime:
             dev_projects or [], dev_root or (Path.home() / "Projects/project-web"),
             emit=self.emit, directory=runtime_directory(), stop=self.stop)
         self.interview = InterviewAssistant(emit=self.emit)
+        self.voice = VoiceAssistant(emit=self.emit, launcher=self.launcher)
         self.lock = threading.RLock()
         self.pending = {}  # (session_id, request_id) -> ready/submitting/uncertain
         self.resolved = set()  # do not resurrect replayed resolved requests
@@ -697,6 +699,15 @@ class BridgeRuntime:
                 elif action == "interview_status":
                     self.interview.emit_status()
                     message = "Status interview diperbarui"
+                elif action == "voice_start":
+                    message = self.voice.start()
+                elif action == "voice_stop":
+                    message = self.voice.stop()
+                elif action == "voice_text":
+                    message = self.voice.run_text(data.get("text"))
+                elif action == "voice_status":
+                    self.voice.emit_status()
+                    message = "Status suara diperbarui"
                 else:
                     raise ValueError("Unknown action")
                 result.update(ok=True, message=message)
