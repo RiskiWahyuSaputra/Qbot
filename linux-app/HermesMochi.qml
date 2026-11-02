@@ -247,7 +247,8 @@ PanelWindow {
 
     function activityColor(kind) {
         if (kind === "error" || kind === "deny") return "#ef4444";
-        if (kind === "start") return theme.text;
+        if (kind === "done") return "#22c55e";
+        if (kind === "start") return "#38bdf8";
         return theme.subtext1;
     }
 
@@ -539,6 +540,10 @@ PanelWindow {
     property string sysUptime: "-"
     property string sysKernel: "-"
     property int sysProcesses: 0
+    property int sysDiskPercent: 0
+    property string sysDiskUsed: "0 GB"
+    property string sysDiskTotal: "0 GB"
+    property string sysDiskFree: "0 GB"
 
     // Spotify & Media State: MPRIS langsung dari D-Bus (realtime, tanpa polling proses).
     // Pemutar dipilih: yang sedang main lebih dulu, Spotify diutamakan, lalu yang metadatanya
@@ -1723,6 +1728,10 @@ PanelWindow {
                     root.sysUptime = s.uptime || "-";
                     root.sysKernel = s.kernel || "-";
                     root.sysProcesses = s.active_processes || 0;
+                    root.sysDiskPercent = s.disk_percent || 0;
+                    root.sysDiskUsed = s.disk_used || "0 GB";
+                    root.sysDiskTotal = s.disk_total || "0 GB";
+                    root.sysDiskFree = s.disk_free || "0 GB";
                 } catch(e) {}
             }
         }
@@ -3240,7 +3249,7 @@ PanelWindow {
                                     id: subTxt
                                     anchors.centerIn: parent
                                     text: subBtn.modelData.label
-                                    color: subBtn.active ? root.theme.text : root.theme.subtext0
+                                    color: subBtn.active ? root.theme.text : root.theme.subtext1
                                     font.pixelSize: 9; font.bold: true
                                 }
                                 MouseArea {
@@ -3440,9 +3449,9 @@ PanelWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Layout.topMargin: -4
-                                Text { text: root.formatTime(root.mediaPosition); color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: root.formatTime(root.mediaPosition); color: root.theme.subtext1; font.pixelSize: 10 }
                                 Item { Layout.fillWidth: true }
-                                Text { text: root.mediaLength > 0 ? root.formatTime(root.mediaLength) : ""; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: root.mediaLength > 0 ? root.formatTime(root.mediaLength) : ""; color: root.theme.subtext1; font.pixelSize: 10 }
                             }
 
                             Row {
@@ -3658,7 +3667,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: parent.modelData.label
                                     color: parent.active ? "#ffffff" : root.theme.subtext0
-                                    font.pixelSize: 9; font.bold: true
+                                    font.pixelSize: 10; font.bold: true
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -3675,7 +3684,7 @@ PanelWindow {
                             visible: notesModel.count > 0
                             text: notesTabCol.confirmClear ? "Yakin hapus semua?" : "Hapus semua"
                             color: notesTabCol.confirmClear ? "#fca5a5" : (clearAllHover.containsMouse ? root.theme.textDim : root.theme.subtext0)
-                            font.pixelSize: 9; font.bold: true
+                            font.pixelSize: 10; font.bold: true
                             Layout.rightMargin: 4
                             MouseArea {
                                 id: clearAllHover
@@ -3748,7 +3757,7 @@ PanelWindow {
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: "Klik “+ Catatan baru” untuk mulai menulis"
-                                color: root.theme.overlay; font.pixelSize: 9
+                                color: root.theme.subtext0; font.pixelSize: 10
                             }
                         }
 
@@ -3802,7 +3811,7 @@ PanelWindow {
                                     Text {
                                         text: noteCard.preview
                                         color: noteCard.type === "cmd" ? root.theme.textDim : root.theme.subtext1
-                                        font.pixelSize: noteCard.type === "cmd" ? 9 : 10
+                                        font.pixelSize: noteCard.type === "cmd" ? 10 : 11
                                         font.family: noteCard.type === "cmd" ? "JetBrains Mono, monospace" : "Inter, sans-serif"
                                         wrapMode: noteCard.type === "cmd" ? Text.WrapAnywhere : Text.Wrap
                                         maximumLineCount: noteCard.heading ? 2 : 3
@@ -3826,12 +3835,12 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: noteCard.type === "cmd" ? "Command" : (noteCard.type === "task" ? "Task" : "Memo")
                                                 color: noteCard.note.color ? noteCard.accent : root.theme.textDim
-                                                font.pixelSize: 8; font.bold: true
+                                                font.pixelSize: 9; font.bold: true
                                             }
                                         }
                                         Text {
                                             text: noteCard.note.time || ""
-                                            color: root.theme.overlay; font.pixelSize: 8
+                                            color: root.theme.subtext0; font.pixelSize: 9
                                         }
                                         Item { Layout.fillWidth: true }
 
@@ -3930,7 +3939,7 @@ PanelWindow {
                                         id: backRow
                                         anchors.centerIn: parent
                                         text: "‹  Kembali"
-                                        color: "#ffffff"; font.pixelSize: 9; font.bold: true
+                                        color: "#ffffff"; font.pixelSize: 10; font.bold: true
                                     }
                                     MouseArea {
                                         id: backHoverN
@@ -3960,7 +3969,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: parent.modelData.label
                                             color: parent.active ? "#ffffff" : root.theme.subtext0
-                                            font.pixelSize: 9; font.bold: true
+                                            font.pixelSize: 10; font.bold: true
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -4011,7 +4020,7 @@ PanelWindow {
                                                 : edAction.modelData === "copy" ? (edAction.copied ? "✓ Tersalin" : "Salin")
                                                 : (noteEditor.confirmDelete ? "Yakin hapus?" : "Hapus")
                                             color: edAction.danger ? (noteEditor.confirmDelete ? "#fecaca" : "#f87171") : "#ffffff"
-                                            font.pixelSize: 9; font.bold: true
+                                            font.pixelSize: 10; font.bold: true
                                         }
                                         Timer { id: copiedTimer; interval: 1500; onTriggered: edAction.copied = false }
                                         MouseArea {
@@ -4088,19 +4097,19 @@ PanelWindow {
                                 Layout.fillWidth: true
                                 Text {
                                     text: noteEditor.note ? "Dibuat " + (noteEditor.note.time || "-") : ""
-                                    color: root.theme.overlay; font.pixelSize: 8
+                                    color: root.theme.subtext0; font.pixelSize: 9
                                 }
                                 Item { Layout.fillWidth: true }
                                 Text {
                                     text: noteSaveTimer.running ? "Menyimpan…" : "Tersimpan otomatis · Esc untuk kembali"
-                                    color: root.theme.overlay; font.pixelSize: 8
+                                    color: root.theme.subtext0; font.pixelSize: 9
                                 }
                             }
                         }
                     }
                 }
 
-                // TAB AGENT: chip status tiap agent, sesi aktif, lalu riwayat.
+                // TAB AGENT: status agent ringkas, satu sesi utama (gaya live activity), lalu riwayat.
                 ColumnLayout {
                     id: agentTab
                     visible: root.activeTab === "agent"
@@ -4116,10 +4125,12 @@ PanelWindow {
                         return root.agentSessions.slice().sort((a, b) =>
                             ((rank[b.state] || 0) - (rank[a.state] || 0)) || ((b.updated || 0) - (a.updated || 0)));
                     }
+                    readonly property var mainSession: sortedSessions.length > 0 ? sortedSessions[0] : null
 
-                    // Baris 1: chip status Claude Code · Hermes · OpenCode + sakelar auto-izin
+                    // Baris 1: logo tiap agent + titik status, lalu sakelar auto-izin
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.leftMargin: 2
                         spacing: 6
 
                         Repeater {
@@ -4139,25 +4150,19 @@ PanelWindow {
                                 readonly property bool dim: state === "none"
 
                                 implicitWidth: chipRow.implicitWidth + 16
-                                implicitHeight: 28
-                                radius: 14
-                                color: root.theme.surface0
-                                border.color: state === "waiting" ? "#f97316" : root.theme.surface1
-                                opacity: dim ? 0.6 : 1.0
-                                Behavior on border.color { ColorAnimation { duration: 200 } }
+                                implicitHeight: 26
+                                radius: 13
+                                color: agentChip.state === "waiting" ? Qt.rgba(0.976, 0.451, 0.086, 0.16)
+                                     : (chipHover.containsMouse ? root.theme.surface1 : root.theme.surface0)
+                                Behavior on color { ColorAnimation { duration: 200 } }
 
                                 Row {
                                     id: chipRow
                                     anchors.centerIn: parent
                                     spacing: 6
-                                    SourceLogo { kind: agentChip.modelData; size: 16; anchors.verticalCenter: parent.verticalCenter }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: agentChip.isHermes ? "Hermes" : (agentChip.modelData === "claude" ? "Claude" : "OpenCode")
-                                        color: root.theme.text; font.pixelSize: 10; font.bold: true
-                                    }
+                                    opacity: agentChip.dim ? 0.45 : 1.0
+                                    SourceLogo { kind: agentChip.modelData; size: 15; anchors.verticalCenter: parent.verticalCenter }
                                     Rectangle {
-                                        visible: !agentChip.dim
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 6; height: 6; radius: 3
                                         color: agentChip.tint
@@ -4170,27 +4175,30 @@ PanelWindow {
                                         }
                                     }
                                     Text {
-                                        // Agent tanpa sesi cukup logo + nama redup, tanpa label.
-                                        visible: !agentChip.dim
+                                        // Label hanya untuk status yang perlu dilihat; idle/kosong cukup titik.
+                                        visible: agentChip.state === "offline" || agentChip.state === "working"
+                                                 || agentChip.state === "waiting" || agentChip.state === "error"
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: agentChip.state === "offline" ? "Offline"
                                               : root.stateLabel(agentChip.state) + (agentChip.count > 1 ? " · " + agentChip.count : "")
-                                        color: agentChip.dim ? root.theme.subtext0 : agentChip.tint
-                                        font.pixelSize: 9; font.bold: true
+                                        color: agentChip.tint
+                                        font.pixelSize: 10; font.bold: true
                                     }
                                 }
 
-                                // Detail koneksi Hermes (pesan bridge mentah) cukup sebagai tooltip.
                                 MouseArea {
                                     id: chipHover
                                     anchors.fill: parent
-                                    hoverEnabled: agentChip.isHermes
+                                    hoverEnabled: true
                                 }
                                 ToolTip {
-                                    visible: agentChip.isHermes && chipHover.containsMouse
+                                    visible: chipHover.containsMouse
                                     delay: 300
-                                    text: !root.hermesConnected ? (root.hermesStatusMessage || "Menunggu koneksi Hermes…")
-                                          : (root.hermesWorking ? (root.activeDetail || "Mengerjakan task…") : "Siap menerima prompt & task")
+                                    text: root.agentName(agentChip.modelData) + " — " + (agentChip.isHermes
+                                          ? (!root.hermesConnected ? (root.hermesStatusMessage || "Menunggu koneksi Hermes…")
+                                             : (root.hermesWorking ? (root.activeDetail || "Mengerjakan task…") : "Siap menerima prompt & task"))
+                                          : (agentChip.dim ? "Tidak ada sesi" : root.stateLabel(agentChip.state)
+                                             + " · " + agentChip.count + " sesi"))
                                 }
                             }
                         }
@@ -4199,27 +4207,27 @@ PanelWindow {
 
                         // Auto-izinkan perintah baca-saja (git status, ls, cat, …)
                         Row {
-                            spacing: 6
+                            spacing: 7
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "Auto-izin"
-                                color: root.theme.subtext0; font.pixelSize: 9; font.bold: true
+                                color: settings.autoSafe ? root.theme.text : root.theme.subtext1
+                                font.pixelSize: 10; font.bold: true
                             }
                             ToolTip.visible: autoSafeHover.hovered
                             ToolTip.delay: 400
                             ToolTip.text: "Izinkan otomatis perintah baca-saja (git status, ls, cat, …)"
                             Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 26; height: 14; radius: 7
-                                color: settings.autoSafe ? Qt.darker(root.theme.accent, 1.4) : root.theme.surface1
-                                border.color: settings.autoSafe ? root.theme.accent : root.theme.surface2
-                                Behavior on color { ColorAnimation { duration: 150 } }
+                                width: 28; height: 16; radius: 8
+                                color: settings.autoSafe ? "#22c55e" : root.theme.surface1
+                                Behavior on color { ColorAnimation { duration: 180 } }
                                 Rectangle {
-                                    width: 10; height: 10; radius: 5
+                                    width: 12; height: 12; radius: 6
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: settings.autoSafe ? parent.width - width - 2 : 2
-                                    color: settings.autoSafe ? "#ffffff" : root.theme.subtext0
-                                    Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                                    color: settings.autoSafe ? "#ffffff" : root.theme.subtext1
+                                    Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                                 }
                             }
                             TapHandler { onTapped: settings.autoSafe = !settings.autoSafe }
@@ -4227,99 +4235,133 @@ PanelWindow {
                         }
                     }
 
-                    // Baris 2: sesi aktif (maks. 2, yang paling butuh perhatian dulu)
-                    ColumnLayout {
+                    // Baris 2: kartu sesi utama (yang paling butuh perhatian)
+                    Rectangle {
+                        id: mainCard
+                        readonly property var sess: agentTab.mainSession
+                        readonly property color tint: sess ? root.stateColor(sess.state) : root.theme.overlay
+                        readonly property bool live: !!sess && (sess.state === "working" || sess.state === "waiting")
                         Layout.fillWidth: true
-                        spacing: 4
+                        Layout.preferredHeight: 56
+                        radius: 16
+                        color: sess && sess.state === "waiting" ? Qt.rgba(0.976, 0.451, 0.086, 0.12) : root.theme.surface0
+                        Behavior on color { ColorAnimation { duration: 200 } }
+
+                        RowLayout {
+                            visible: !!mainCard.sess
+                            anchors.fill: parent
+                            anchors.leftMargin: 11
+                            anchors.rightMargin: 14
+                            spacing: 11
+
+                            // Logo dalam cincin status; cincin berdenyut saat sesi aktif.
+                            Item {
+                                implicitWidth: 34; implicitHeight: 34
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 17
+                                    color: root.theme.base
+                                    border.width: 2
+                                    border.color: mainCard.tint
+                                    SequentialAnimation on border.color {
+                                        running: mainCard.live
+                                        loops: Animation.Infinite
+                                        ColorAnimation { to: Qt.rgba(mainCard.tint.r, mainCard.tint.g, mainCard.tint.b, 0.25); duration: 700; easing.type: Easing.InOutSine }
+                                        ColorAnimation { to: mainCard.tint; duration: 700; easing.type: Easing.InOutSine }
+                                    }
+                                }
+                                SourceLogo { anchors.centerIn: parent; kind: mainCard.sess ? mainCard.sess.agent : "claude"; size: 18 }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text {
+                                    text: mainCard.sess ? (mainCard.sess.project || "?") : ""
+                                    color: root.theme.text; font.pixelSize: 13; font.bold: true
+                                    elide: Text.ElideRight; Layout.fillWidth: true
+                                }
+                                Text {
+                                    visible: text !== ""
+                                    text: mainCard.sess ? (mainCard.sess.detail || mainCard.sess.prompt || "") : ""
+                                    color: root.theme.subtext1; font.pixelSize: 10
+                                    font.family: "JetBrains Mono, monospace"
+                                    elide: Text.ElideMiddle; Layout.fillWidth: true
+                                }
+                            }
+
+                            // Status + umur sesi bertumpuk di kanan
+                            ColumnLayout {
+                                spacing: 3
+                                Row {
+                                    Layout.alignment: Qt.AlignRight
+                                    spacing: 5
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 6; height: 6; radius: 3
+                                        color: mainCard.tint
+                                    }
+                                    Text {
+                                        text: mainCard.sess ? root.stateLabel(mainCard.sess.state) : ""
+                                        color: mainCard.tint; font.pixelSize: 11; font.bold: true
+                                    }
+                                }
+                                Text {
+                                    Layout.alignment: Qt.AlignRight
+                                    // currentTimeSecs: dependensi agar "x dtk" ikut berdetak
+                                    text: mainCard.sess && root.currentTimeSecs !== "" ? root.agoText(mainCard.sess.updated) : ""
+                                    color: root.theme.subtext0; font.pixelSize: 9
+                                }
+                            }
+                        }
+
+                        Column {
+                            visible: !mainCard.sess
+                            anchors.centerIn: parent
+                            spacing: 3
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: "Belum ada sesi aktif"
+                                color: root.theme.textDim; font.pixelSize: 12; font.bold: true
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: "Jalankan Claude Code atau OpenCode, statusnya muncul di sini"
+                                color: root.theme.subtext0; font.pixelSize: 10
+                            }
+                        }
+                    }
+
+                    // Sesi lain cukup sebaris: logo · project · titik status
+                    Row {
+                        visible: agentTab.sortedSessions.length > 1
+                        Layout.leftMargin: 6
+                        spacing: 12
 
                         Repeater {
-                            model: agentTab.sortedSessions.slice(0, 2)
+                            model: agentTab.sortedSessions.slice(1, 3)
 
-                            Rectangle {
-                                id: sessRow
+                            Row {
+                                id: otherSess
                                 required property var modelData
-                                readonly property color tint: root.stateColor(modelData.state)
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 38
-                                radius: 8
-                                color: root.theme.surface0
-                                border.color: modelData.state === "waiting" ? "#f97316" : root.theme.surface1
-
-                                // Garis status di kiri
-                                Rectangle {
-                                    x: 0; y: 8
-                                    width: 3; height: parent.height - 16; radius: 1.5
-                                    color: sessRow.tint
+                                spacing: 5
+                                SourceLogo { kind: otherSess.modelData.agent; size: 12; anchors.verticalCenter: parent.verticalCenter }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: otherSess.modelData.project || "?"
+                                    color: root.theme.textDim; font.pixelSize: 10; font.bold: true
                                 }
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    spacing: 8
-
-                                    SourceLogo { kind: sessRow.modelData.agent; size: 18 }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 1
-                                        Text {
-                                            text: sessRow.modelData.project || "?"
-                                            color: root.theme.text; font.pixelSize: 11; font.bold: true
-                                            elide: Text.ElideRight; Layout.fillWidth: true
-                                        }
-                                        Text {
-                                            visible: text !== ""
-                                            text: sessRow.modelData.detail || sessRow.modelData.prompt || ""
-                                            color: root.theme.subtext1; font.pixelSize: 9
-                                            font.family: "JetBrains Mono, monospace"
-                                            elide: Text.ElideMiddle; Layout.fillWidth: true
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        implicitWidth: sessState.implicitWidth + 12
-                                        implicitHeight: 16
-                                        radius: 8
-                                        color: Qt.rgba(sessRow.tint.r, sessRow.tint.g, sessRow.tint.b, 0.15)
-                                        Text {
-                                            id: sessState
-                                            anchors.centerIn: parent
-                                            text: root.stateLabel(sessRow.modelData.state)
-                                            color: sessRow.tint; font.pixelSize: 8; font.bold: true
-                                        }
-                                    }
-
-                                    Text {
-                                        // currentTimeSecs: dependensi agar "x dtk" ikut berdetak
-                                        text: root.currentTimeSecs !== "" ? root.agoText(sessRow.modelData.updated) : ""
-                                        color: root.theme.overlay; font.pixelSize: 8
-                                        Layout.preferredWidth: 34
-                                        horizontalAlignment: Text.AlignRight
-                                    }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: root.stateLabel(otherSess.modelData.state)
+                                    color: root.stateColor(otherSess.modelData.state); font.pixelSize: 10
                                 }
                             }
                         }
-
                         Text {
-                            visible: root.agentSessions.length > 2
-                            text: "+" + (root.agentSessions.length - 2) + " sesi lainnya"
-                            color: root.theme.subtext0; font.pixelSize: 9
-                            Layout.leftMargin: 4
-                        }
-
-                        Rectangle {
-                            visible: root.agentSessions.length === 0
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 38
-                            radius: 8
-                            color: "transparent"
-                            border.color: root.theme.surface1
-                            Text {
-                                anchors.centerIn: parent
-                                text: "Belum ada sesi Claude Code / OpenCode yang aktif"
-                                color: root.theme.overlay; font.pixelSize: 10
-                            }
+                            visible: agentTab.sortedSessions.length > 3
+                            text: "+" + (agentTab.sortedSessions.length - 3) + " lainnya"
+                            color: root.theme.subtext0; font.pixelSize: 10
                         }
                     }
 
@@ -4327,7 +4369,12 @@ PanelWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 2
-                        Text { text: "Riwayat"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
+                        Layout.leftMargin: 6
+                        Layout.rightMargin: 6
+                        Text {
+                            text: "RIWAYAT"
+                            color: root.theme.subtext1; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1.2
+                        }
                         Item { Layout.fillWidth: true }
                         Text {
                             readonly property var today: (activity.daily || {})[root.dayKey(new Date())]
@@ -4337,17 +4384,14 @@ PanelWindow {
                         }
                     }
 
-                    Rectangle {
+                    Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        radius: 8
-                        color: root.theme.mantle
                         clip: true
 
                         ListView {
                             id: historyView
                             anchors.fill: parent
-                            anchors.margins: 4
                             spacing: 0
                             clip: true
                             model: activity.history || []
@@ -4358,17 +4402,18 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: historyView.count === 0
                                 text: "Belum ada aktivitas tercatat"
-                                color: root.theme.overlay
-                                font.pixelSize: 10
+                                color: root.theme.subtext0
+                                font.pixelSize: 11
                             }
 
+                            // Baris: jam · logo · project · teks ............ durasi · status
                             delegate: Rectangle {
                                 id: histRow
                                 required property var modelData
                                 readonly property color tint: root.activityColor(modelData.kind)
                                 width: historyView.width - 6
-                                height: 22
-                                radius: 5
+                                height: 26
+                                radius: 8
                                 color: histHover.hovered ? root.theme.surface0 : "transparent"
                                 HoverHandler { id: histHover }
 
@@ -4376,62 +4421,53 @@ PanelWindow {
                                     anchors.fill: parent
                                     anchors.leftMargin: 6
                                     anchors.rightMargin: 6
-                                    spacing: 7
+                                    spacing: 8
                                     Text {
                                         text: root.clockText(histRow.modelData.t)
-                                        color: root.theme.overlay
-                                        font.pixelSize: 9
+                                        color: root.theme.subtext0
+                                        font.pixelSize: 10
                                         font.family: "JetBrains Mono, monospace"
-                                        Layout.preferredWidth: 30
+                                        Layout.preferredWidth: 36
                                     }
-                                    SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 12 }
+                                    SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 14 }
                                     Text {
                                         text: histRow.modelData.project || "—"
-                                        color: root.theme.textDim; font.pixelSize: 9; font.bold: true
+                                        color: root.theme.text; font.pixelSize: 10; font.bold: true
                                         elide: Text.ElideRight
-                                        Layout.preferredWidth: 78
-                                    }
-                                    Rectangle {
-                                        Layout.preferredWidth: 72
-                                        implicitHeight: 15
-                                        radius: 7.5
-                                        color: Qt.rgba(histRow.tint.r, histRow.tint.g, histRow.tint.b, 0.14)
-                                        Text {
-                                            anchors.centerIn: parent
-                                            width: parent.width - 8
-                                            horizontalAlignment: Text.AlignHCenter
-                                            text: root.activityLabel(histRow.modelData.kind)
-                                            color: histRow.tint
-                                            font.pixelSize: 8; font.bold: true
-                                            elide: Text.ElideRight
-                                        }
+                                        Layout.maximumWidth: 90
                                     }
                                     Text {
                                         text: histRow.modelData.text
                                         color: root.theme.subtext1
-                                        font.pixelSize: 9
+                                        font.pixelSize: 10
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
                                     Text {
                                         visible: !!histRow.modelData.dur
                                         text: histRow.modelData.dur || ""
-                                        color: root.theme.subtext0; font.pixelSize: 8
+                                        color: root.theme.subtext0; font.pixelSize: 9
+                                    }
+                                    Text {
+                                        text: root.activityLabel(histRow.modelData.kind)
+                                        color: histRow.tint
+                                        font.pixelSize: 10; font.bold: true
+                                        horizontalAlignment: Text.AlignRight
+                                        Layout.preferredWidth: 84
                                     }
                                 }
                             }
                         }
 
-                        // Fade bawah: baris terakhir tidak terlihat terpotong di tepi.
+                        // Fade bawah: baris terakhir larut ke latar island, tidak terpotong kasar.
                         Rectangle {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            height: 18
-                            radius: 8
+                            height: 14
                             gradient: Gradient {
                                 GradientStop { position: 0.0; color: "transparent" }
-                                GradientStop { position: 1.0; color: root.theme.mantle }
+                                GradientStop { position: 1.0; color: root.theme.base }
                             }
                         }
                     }
@@ -4465,7 +4501,7 @@ PanelWindow {
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 4
                                 RowLayout {
-                                    Text { text: "CPU"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                    Text { text: "CPU"; color: root.theme.subtext1; font.pixelSize: 10 }
                                     Item { Layout.fillWidth: true }
                                     Text { text: root.sysCpu + "%"; color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"; font.pixelSize: 10; font.bold: true }
                                 }
@@ -4477,7 +4513,7 @@ PanelWindow {
                                         color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"
                                     }
                                 }
-                                Text { text: root.sysProcesses + " proses"; color: root.theme.subtext1; font.pixelSize: 9 }
+                                Text { text: root.sysProcesses + " proses"; color: root.theme.subtext1; font.pixelSize: 10 }
                             }
                         }
 
@@ -4487,7 +4523,7 @@ PanelWindow {
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 4
                                 RowLayout {
-                                    Text { text: "RAM Terpakai"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                    Text { text: "RAM Terpakai"; color: root.theme.subtext1; font.pixelSize: 10 }
                                     Item { Layout.fillWidth: true }
                                     Text { text: "" + root.sysRamPercent + "%"; color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent; font.pixelSize: 10; font.bold: true }
                                 }
@@ -4500,7 +4536,7 @@ PanelWindow {
                                         color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent
                                     }
                                 }
-                                Text { text: root.sysRamUsed + " / " + root.sysRamTotal; color: root.theme.subtext1; font.pixelSize: 9 }
+                                Text { text: root.sysRamUsed + " / " + root.sysRamTotal; color: root.theme.subtext1; font.pixelSize: 10 }
                             }
                         }
 
@@ -4509,10 +4545,34 @@ PanelWindow {
                             Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 2
-                                Text { text: "System Uptime"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "System Uptime"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: root.sysUptime; color: root.theme.text; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                Text { text: root.sysKernel; color: root.theme.subtext0; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: root.sysKernel; color: root.theme.subtext1; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
                             }
+                        }
+                    }
+
+                    // Kartu Penyimpanan: sisa ruang partisi root (/)
+                    Rectangle {
+                        id: diskCard
+                        Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
+                        readonly property color diskColor: root.sysDiskPercent > 90 ? "#ef4444" : (root.sysDiskPercent > 75 ? "#f59e0b" : "#22c55e")
+                        ColumnLayout {
+                            anchors.fill: parent; anchors.margins: 8; spacing: 4
+                            RowLayout {
+                                Text { text: "Penyimpanan (/)"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Item { Layout.fillWidth: true }
+                                Text { text: "Sisa " + root.sysDiskFree; color: diskCard.diskColor; font.pixelSize: 10; font.bold: true }
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true; height: 4; radius: 2; color: root.theme.surface1
+                                Rectangle {
+                                    width: parent.width * Math.min(1, root.sysDiskPercent / 100.0)
+                                    height: parent.height; radius: 2
+                                    color: diskCard.diskColor
+                                }
+                            }
+                            Text { text: root.sysDiskUsed + " / " + root.sysDiskTotal + " terpakai (" + root.sysDiskPercent + "%)"; color: root.theme.subtext1; font.pixelSize: 10 }
                         }
                     }
 
@@ -4548,7 +4608,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Requests"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "Requests"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: "" + root.usageRequests; color: "#fff"; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4557,7 +4617,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Biaya Hari Ini"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "Biaya Hari Ini"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: "$" + root.usageCost.toFixed(2); color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4566,7 +4626,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Tokens"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "Tokens"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: root.formatTokens(root.usageTokens); color: root.theme.accent; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4590,7 +4650,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Requests"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "Total Requests"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: "" + root.usage60dRequests; color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4599,7 +4659,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Biaya (60d)"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "Total Biaya (60d)"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: "$" + root.usage60dCost.toFixed(2); color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4608,7 +4668,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Tokens (60d)"; color: root.theme.subtext0; font.pixelSize: 9 }
+                                Text { text: "Total Tokens (60d)"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 Text { text: root.formatTokens(root.usage60dTokens); color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4626,7 +4686,7 @@ PanelWindow {
                     Text {
                         visible: root.activeModelsList.length === 0
                         text: "Belum ada request hari ini"
-                        color: root.theme.overlay
+                        color: root.theme.subtext0
                         font.pixelSize: 10
                     }
 
@@ -4761,7 +4821,7 @@ PanelWindow {
                                     Text {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         text: toolTile.modelData.sub
-                                        color: root.theme.subtext0; font.pixelSize: 8
+                                        color: root.theme.subtext1; font.pixelSize: 9
                                     }
                                 }
 
@@ -4797,7 +4857,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     spacing: 0
                                     Text { text: "Volume"; color: root.theme.text; font.pixelSize: 10; font.bold: true }
-                                    Text { text: "PipeWire"; color: root.theme.subtext0; font.pixelSize: 8 }
+                                    Text { text: "PipeWire"; color: root.theme.subtext1; font.pixelSize: 9 }
                                 }
                                 Rectangle {
                                     implicitWidth: volSeg.implicitWidth
@@ -4852,7 +4912,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     spacing: 0
                                     Text { text: "Notifikasi"; color: root.theme.text; font.pixelSize: 10; font.bold: true }
-                                    Text { text: settings.sound ? "Bunyi menyala" : "Senyap"; color: root.theme.subtext0; font.pixelSize: 8 }
+                                    Text { text: settings.sound ? "Bunyi menyala" : "Senyap"; color: root.theme.subtext1; font.pixelSize: 9 }
                                 }
                                 Rectangle {
                                     width: 30; height: 16; radius: 8
@@ -4911,7 +4971,7 @@ PanelWindow {
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 4
-                                Text { text: "Refresh"; color: root.theme.subtext1; font.pixelSize: 9; font.bold: true }
+                                Text { text: "Refresh"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
                             }
                             MouseArea {
                                 id: refreshHover
@@ -4942,7 +5002,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: root.gitProjectsList.length === 0
                                 text: "Memuat project… (atau tidak ada di ~/Projects/project-web)"
-                                color: root.theme.overlay
+                                color: root.theme.subtext0
                                 font.pixelSize: 11
                             }
 
@@ -4984,7 +5044,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: "ACTIVE"
                                                 color: root.theme.textDim
-                                                font.pixelSize: 8
+                                                font.pixelSize: 9
                                                 font.bold: true
                                             }
                                         }
@@ -5002,7 +5062,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: modelData.branch || "master"
                                                 color: root.theme.textDim
-                                                font.pixelSize: 8
+                                                font.pixelSize: 9
                                                 font.bold: true
                                                 font.family: "JetBrains Mono, monospace"
                                             }
@@ -5023,7 +5083,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: modelData.commits_today > 0 ? (modelData.commits_today + " commit hari ini") : "0 commit"
                                                 color: modelData.commits_today > 0 ? root.theme.textDim : root.theme.subtext0
-                                                font.pixelSize: 8
+                                                font.pixelSize: 9
                                                 font.bold: true
                                             }
                                         }
@@ -5032,7 +5092,7 @@ PanelWindow {
                                         Text {
                                             text: modelData.modified > 0 ? ("+" + modelData.modified + " modif") : "✓ clean"
                                             color: modelData.modified > 0 ? root.theme.textDim : root.theme.subtext0
-                                            font.pixelSize: 8
+                                            font.pixelSize: 9
                                             font.bold: true
                                             font.family: "JetBrains Mono, monospace"
                                         }
@@ -5042,8 +5102,8 @@ PanelWindow {
                                     Text {
                                         Layout.fillWidth: true
                                         text: modelData.last_commit || "-"
-                                        color: root.theme.subtext0
-                                        font.pixelSize: 9
+                                        color: root.theme.subtext1
+                                        font.pixelSize: 10
                                         font.family: "JetBrains Mono, monospace"
                                         elide: Text.ElideRight
                                     }
@@ -5070,7 +5130,7 @@ PanelWindow {
                                                 Text {
                                                     text: "Staging"
                                                     color: root.theme.textDim
-                                                    font.pixelSize: 9
+                                                    font.pixelSize: 10
                                                     font.bold: true
                                                 }
                                             }
@@ -5099,7 +5159,7 @@ PanelWindow {
                                                 Text {
                                                     text: "Production"
                                                     color: root.theme.textDim
-                                                    font.pixelSize: 9
+                                                    font.pixelSize: 10
                                                     font.bold: true
                                                 }
                                             }
@@ -5129,7 +5189,7 @@ PanelWindow {
                                                 Text {
                                                     text: "VS Code"
                                                     color: root.theme.textDim
-                                                    font.pixelSize: 9
+                                                    font.pixelSize: 10
                                                 }
                                             }
                                             MouseArea {
@@ -5181,7 +5241,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 visible: root.devServers.length === 0
                                 text: root.bridgeReady ? "Tidak ada project dev server" : "Bridge belum siap…"
-                                color: root.theme.overlay
+                                color: root.theme.subtext0
                                 font.pixelSize: 11
                             }
 
@@ -5229,8 +5289,8 @@ PanelWindow {
                                         Text {
                                             Layout.fillWidth: true
                                             elide: Text.ElideRight
-                                            color: root.theme.subtext0
-                                            font.pixelSize: 9
+                                            color: root.theme.subtext1
+                                            font.pixelSize: 10
                                             text: {
                                                 let parts = [];
                                                 if (devRow.php.available)
@@ -5255,7 +5315,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "serve"
                                             color: devRow.php.running ? root.theme.textDim : root.theme.subtext1
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5278,7 +5338,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "npm dev"
                                             color: devRow.npm.running ? root.theme.textDim : root.theme.subtext1
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5304,7 +5364,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "Start"
                                             color: devRow.availableCount > devRow.runningCount ? root.theme.textDim : root.theme.overlay
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5335,7 +5395,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "Stop"
                                             color: devRow.runningCount > 0 ? root.theme.subtext1 : root.theme.overlay
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5445,7 +5505,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: parent.modelData.label
                                             color: parent.chosen ? "#ffffff" : root.theme.subtext0
-                                            font.pixelSize: 9; font.bold: true
+                                            font.pixelSize: 10; font.bold: true
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -5461,7 +5521,7 @@ PanelWindow {
                         // Auto: saran jawaban otomatis setiap pertanyaan selesai
                         Row {
                             spacing: 5
-                            Text { anchors.verticalCenter: parent.verticalCenter; text: "Auto"; color: root.theme.subtext0; font.pixelSize: 9; font.bold: true }
+                            Text { anchors.verticalCenter: parent.verticalCenter; text: "Auto"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
                             Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 26; height: 14; radius: 7
@@ -5494,7 +5554,7 @@ PanelWindow {
                             implicitWidth: 52; implicitHeight: 24; radius: 12
                             color: usable && jawabHover.containsMouse ? root.theme.surface2 : root.theme.surface1
                             opacity: usable ? 1 : 0.45
-                            Text { anchors.centerIn: parent; text: "Jawab"; color: "#ffffff"; font.pixelSize: 9; font.bold: true }
+                            Text { anchors.centerIn: parent; text: "Jawab"; color: "#ffffff"; font.pixelSize: 10; font.bold: true }
                             MouseArea {
                                 id: jawabHover
                                 anchors.fill: parent
@@ -5516,7 +5576,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: root.interviewRunning ? "■  Stop" : "●  Mulai"
                                 color: root.interviewRunning ? "#fecaca" : "#1c1917"
-                                font.pixelSize: 9; font.bold: true
+                                font.pixelSize: 10; font.bold: true
                             }
                             MouseArea {
                                 id: ivStartHover
@@ -5578,8 +5638,8 @@ PanelWindow {
                                         Text {
                                             Layout.fillWidth: true
                                             text: modelData.body
-                                            color: root.theme.subtext0
-                                            font.pixelSize: 9
+                                            color: root.theme.subtext1
+                                            font.pixelSize: 10
                                             font.family: modelData.n === "3" ? "JetBrains Mono, monospace" : "Inter, sans-serif"
                                             // Path boleh dipotong di mana saja; kalimat biasa per kata.
                                             wrapMode: modelData.n === "3" ? Text.WrapAnywhere : Text.Wrap
@@ -5620,7 +5680,7 @@ PanelWindow {
                                         implicitHeight: 16
                                         radius: 8
                                         color: Qt.rgba(0.96, 0.62, 0.04, 0.16)
-                                        Text { id: ivAnsLbl; anchors.centerIn: parent; text: "Saran jawaban"; color: "#fbbf24"; font.pixelSize: 8; font.bold: true }
+                                        Text { id: ivAnsLbl; anchors.centerIn: parent; text: "Saran jawaban"; color: "#fbbf24"; font.pixelSize: 9; font.bold: true }
                                     }
                                     Item { Layout.fillWidth: true }
                                     Text {
@@ -5634,7 +5694,7 @@ PanelWindow {
                                     Text {
                                         visible: root.interviewAnswers.length > 1
                                         text: (root.interviewAnswerIndex + 1) + " / " + root.interviewAnswers.length
-                                        color: root.theme.subtext0; font.pixelSize: 9
+                                        color: root.theme.subtext1; font.pixelSize: 10
                                     }
                                     Text {
                                         visible: root.interviewAnswers.length > 1
@@ -5700,7 +5760,7 @@ PanelWindow {
                                 anchors.fill: parent
                                 anchors.margins: 8
                                 spacing: 4
-                                Text { text: "Transkrip"; color: root.theme.subtext1; font.pixelSize: 9; font.bold: true }
+                                Text { text: "Transkrip"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
 
                                 ListView {
                                     id: ivTranscriptView
@@ -5718,8 +5778,8 @@ PanelWindow {
                                         wrapMode: Text.Wrap
                                         visible: root.interviewTranscript.length === 0
                                         text: "Ucapan pewawancara muncul di sini"
-                                        color: root.theme.overlay
-                                        font.pixelSize: 9
+                                        color: root.theme.subtext0
+                                        font.pixelSize: 10
                                     }
 
                                     delegate: Column {
@@ -5728,8 +5788,8 @@ PanelWindow {
                                         spacing: 1
                                         Text {
                                             text: modelData.time.slice(0, 5)
-                                            color: root.theme.overlay
-                                            font.pixelSize: 8
+                                            color: root.theme.subtext0
+                                            font.pixelSize: 9
                                             font.family: "JetBrains Mono, monospace"
                                         }
                                         Text {

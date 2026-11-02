@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -96,7 +97,15 @@ def media():
 
 def sysinfo():
     result = {"cpu": 0, "ram_percent": 0, "ram_used": "0 GB", "ram_total": "0 GB",
-              "uptime": "up", "kernel": platform.release(), "active_processes": 0}
+              "uptime": "up", "kernel": platform.release(), "active_processes": 0,
+              "disk_percent": 0, "disk_used": "0 GB", "disk_total": "0 GB", "disk_free": "0 GB"}
+    try:
+        disk = shutil.disk_usage("/")
+        result.update(disk_percent=round(disk.used * 100 / disk.total) if disk.total else 0,
+                      disk_used=f"{disk.used / 1024**3:.0f} GB", disk_total=f"{disk.total / 1024**3:.0f} GB",
+                      disk_free=f"{disk.free / 1024**3:.0f} GB")
+    except OSError as exc:
+        diagnostic("Disk usage unavailable", exc)
     try:
         import psutil
         mem = psutil.virtual_memory()
