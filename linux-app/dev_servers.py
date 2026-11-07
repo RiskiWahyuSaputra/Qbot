@@ -319,6 +319,13 @@ class DevServerManager:
             self._advance_stopping()
             self._prune_dead()
 
+    def _emit_died(self, key):
+        """Server mati tanpa diminta; stop() menghapus state lebih dulu, jadi tidak sampai ke sini."""
+        project_id, service = key.split(":", 1)
+        name = next((p[1] for p in self.projects if p[0] == project_id), project_id)
+        self.emit({"event": "DevServerDied", "project": project_id, "name": name,
+                   "service": service, "label": LABELS.get(service, service)})
+
     def _reap_children(self):
         finished = []
         with self.lock:
@@ -345,9 +352,7 @@ class DevServerManager:
             if died:
                 self._save_locked()
         for key in died:
-            project_id, service = key.split(":", 1)
-            self.emit({"event": "ActionResult", "id": "", "ok": False,
-                       "message": "%s (%s) berhenti sendiri" % (service, project_id)})
+            self._emit_died(key)
         if died:
             self.emit_status()
 
@@ -384,5 +389,7 @@ class DevServerManager:
                     died.append(key)
             if died:
                 self._save_locked()
+        for key in died:
+            self._emit_died(key)
         if died:
             self.emit_status()

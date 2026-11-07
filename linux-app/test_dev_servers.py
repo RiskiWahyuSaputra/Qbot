@@ -201,6 +201,40 @@ class DevServerManagerTest(unittest.TestCase):
         raw = (self.root / "runtime" / "devservers.json").read_text()
         self.assertNotIn(str(proc.pid), raw)
 
+    def _died(self):
+        return [e for e in self.events if e.get("event") == "DevServerDied"]
+
+    def test_crashed_child_emits_died_event(self):
+        self.manager.start("demo", ["php"])
+        pid = self.manager.status()[0]["services"][0]["pid"]
+        os.killpg(pid, signal.SIGKILL)
+        self.assertTrue(self._wait_until(lambda: self._died()), "tidak ada DevServerDied")
+        event = self._died()[0]
+        self.assertEqual(event["project"], "demo")
+        self.assertEqual(event["name"], "Demo App")
+        self.assertEqual(event["service"], "php")
+        self.assertEqual(event["label"], "artisan serve")
+
+    def test_reattached_server_death_emits_died_event(self):
+        proc = subprocess.Popen(["sleep", "60"], cwd=self.root / "demo")
+        state = {"demo:php": {"pid": proc.pid, "cwd": str(self.root / "demo"),
+                              "port": 18099, "cmd": ["sleep"]}}
+        (self.root / "runtime").mkdir(exist_ok=True)
+        (self.root / "runtime" / "devservers.json").write_text(json.dumps(state))
+        self._manager()
+        proc.kill()
+        proc.wait()
+        self.assertTrue(self._wait_until(lambda: self._died()), "server reattach mati diam-diam")
+        self.assertEqual(self._died()[0]["service"], "php")
+
+    def test_manual_stop_does_not_emit_died_event(self):
+        self.manager.start("demo", ["php"])
+        pid = self.manager.status()[0]["services"][0]["pid"]
+        self.manager.stop("demo")
+        self.assertTrue(self._wait_until(lambda: not self._pid_alive(pid)))
+        time.sleep(1.5)
+        self.assertEqual(self._died(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

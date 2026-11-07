@@ -1,3 +1,4 @@
+import QtQml
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Layouts
@@ -8,6 +9,8 @@ import Quickshell.Wayland
 import Quickshell.Io
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
+import Quickshell.Services.UPower
+import Quickshell.Bluetooth
 
 PanelWindow {
     id: root
@@ -41,8 +44,8 @@ PanelWindow {
     property bool kbdMode: false             // island dibuka lewat hotkey, fokus keyboard eksklusif
     // Fokus eksklusif dilepas begitu tidak ada lagi panel atau kartu yang terbuka;
     // tanpa ini QBot terus menahan keyboard setelah kartu izin dijawab.
-    onIslandExpandedChanged: if (!islandExpanded && notifyType !== "request" && notifyType !== "approval") kbdMode = false
-    onNotifyTypeChanged: if (notifyType !== "request" && notifyType !== "approval" && !islandExpanded) kbdMode = false
+    onIslandExpandedChanged: if (!islandExpanded && !quickNote && notifyType !== "request" && notifyType !== "approval") kbdMode = false
+    onNotifyTypeChanged: if (notifyType !== "request" && notifyType !== "approval" && !islandExpanded && !quickNote) kbdMode = false
     property bool isNotifying: false
     property string notifyType: "" // "done" | "approval"
     property string activeTab: "notes" // Default tab Catatan; dipulihkan dari settings saat dimuat
@@ -51,14 +54,14 @@ PanelWindow {
     // Preferensi pengguna, tersimpan di ~/.config/hermes-coucou/settings.json
     // (bertahan setelah restart, tidak seperti PersistentProperties).
     property bool settingsReady: false
-    // Tab dikelompokkan supaya navigasi muat di island; Interview berdiri sendiri.
+    // Tab dikelompokkan supaya navigasi muat di island.
     readonly property var tabGroups: [
         {key: "agent", label: "Agent", tabs: [{key: "agent", label: "Agent"}]},
-        {key: "work", label: "Kerja", tabs: [{key: "projects", label: "Projects"}, {key: "dev", label: "Dev Server"}]},
-        {key: "system", label: "Sistem", tabs: [{key: "status", label: "Status"}, {key: "usage", label: "9Router"}, {key: "tools", label: "Tools"}]},
+        {key: "work", label: "Kerja", tabs: [{key: "dev", label: "Dev Server"}]},
+        {key: "system", label: "Sistem", tabs: [{key: "status", label: "Status"}, {key: "tools", label: "Tools"}]},
         {key: "notes", label: "Catatan", tabs: [{key: "notes", label: "Catatan"}]}
     ]
-    readonly property var tabKeys: ["agent", "projects", "dev", "status", "usage", "tools", "notes", "music", "interview"]
+    readonly property var tabKeys: ["agent", "dev", "status", "tools", "notes", "music"]
     property var lastTabInGroup: ({})        // sub-tab terakhir per grup
     readonly property var subTabs: {
         let g = groupOf(activeTab);
@@ -241,6 +244,11 @@ PanelWindow {
         activity.daily = daily;
     }
 
+    function activityGlyph(kind) {
+        if (kind === "start") return "→";
+        if (kind === "error" || kind === "deny") return "✕";
+        return "✓";
+    }
     function activityLabel(kind) {
         return {start: "Task diterima", done: "Selesai", error: "Gagal", allow: "Diizinkan", auto: "Auto-izin",
                 deny: "Ditolak", always: "Selalu diizinkan", answer: "Dijawab"}[kind] || kind;
@@ -292,15 +300,110 @@ PanelWindow {
     readonly property string uiFont: "Roboto"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
 
-    // HUD volume: membaca sink default PipeWire, jadi ikut bereaksi pada perubahan
+    // HUD sistem: tampil sebentar di capsule. Mode bar bila level >= 0 (volume,
+    // brightness), selain itu mode teks (charger, baterai, Bluetooth).
+    property bool hudVisible: false
+    property string hudIcon: ""
+    property string hudText: ""
+    property real hudLevel: -1
+    property string hudValue: ""
+    property color hudTint: theme.accent
+    property bool hudDim: false
+    property bool hudAlert: false             // alert tetap tampil walau aplikasi fullscreen
+    property bool hudArmed: false             // keadaan awal hanya dicatat, bukan ditampilkan
+    readonly property bool hudOn: hudVisible && !islandExpanded && !isNotifying && !quickNote
+
+    // Catatan cepat: hotkey -> capsule jadi kolom teks, Enter simpan, Esc tutup (draf tetap ada).
+    property bool quickNote: false
+    property bool notesLoaded: false          // saveNotesToFile menulis seluruh model; jangan simpan sebelum termuat
+
+    function openQuickNote() {
+        if (notifyType === "approval" || notifyType === "request") return "ada kartu izin yang menunggu";
+        if (quickNote) {
+            closeQuickNote();
+            return "ok";
+        }
+        islandExpanded = false;
+        isNotifying = false;
+        notifyType = "";
+        hudVisible = false;
+        quickNote = true;
+        kbdMode = true;
+        Qt.callLater(() => quickNoteField.forceActiveFocus());
+        return "ok";
+    }
+
+    function closeQuickNote() {
+        quickNote = false;
+        kbdMode = false;
+        islandCapsule.forceActiveFocus();
+        quickNoteRelease.restart();
+    }
+
+    function submitQuickNote() {
+        let text = quickNoteField.text.trim();
+        if (!text) {
+            closeQuickNote();
+            return;
+        }
+        if (!notesLoaded) return;
+        addNoteItem(text);
+        quickNoteField.text = "";
+        closeQuickNote();
+        showHud({icon: papirusIcon("actions", "document-save"), text: "Catatan tersimpan",
+                 value: noteType(text, "") === "cmd" ? "Command" : "Memo"});
+    }
+
+    // Kartu izin ditahan selama mengetik supaya huruf yang diketik tidak menjadi jawaban,
+    // lalu muncul setelah keyboard dilepas compositor.
+    Timer {
+        id: quickNoteRelease
+        interval: 150
+        onTriggered: root.refreshRequestView()
+    }
+    // Izin yang menunggu punya batas waktu: tutup bila pengguna berhenti mengetik.
+    Timer {
+        id: quickNoteIdle
+        interval: 20000
+        running: root.quickNote && root.agentRequests.length > 0
+        onTriggered: root.closeQuickNote()
+    }
+
+    function papirusIcon(group, name) {
+        return "file:///usr/share/icons/Papirus/24x24/" + group + "/" + name + ".svg";
+    }
+
+    function showHud(opts) {
+        hudIcon = opts.icon;
+        hudText = opts.text || "";
+        hudLevel = opts.level === undefined ? -1 : opts.level;
+        hudValue = opts.value || "";
+        hudTint = opts.tint || theme.accent;
+        hudDim = !!opts.dim;
+        hudAlert = !!opts.alert;
+        hudVisible = true;
+        hudTimer.interval = opts.duration || 1500;
+        hudTimer.restart();
+    }
+
+    Timer {
+        id: hudTimer
+        interval: 1500
+        onTriggered: root.hudVisible = false
+    }
+    Timer {
+        interval: 3000
+        running: true
+        onTriggered: root.hudArmed = true
+    }
+
+    // Volume: membaca sink default PipeWire, jadi ikut bereaksi pada perubahan
     // dari mana saja (tombol keyboard lewat inir, wpctl, tab Tools, aplikasi lain).
     readonly property PwNode audioSink: Pipewire.defaultAudioSink
     readonly property bool audioReady: !!audioSink && audioSink.ready && !!audioSink.audio
     property int volumeSinkId: -1
     property real volumeLevel: 0
     property bool volumeMuted: false
-    property bool volumeHud: false
-    readonly property bool volumeHudOn: volumeHud && !islandExpanded && !isNotifying
     readonly property string volumeLabel: volumeMuted ? "Mute" : Math.round(volumeLevel * 100) + "%"
 
     // Sink baru (awal jalan, ganti perangkat) hanya dicatat; HUD muncul saat nilainya berubah.
@@ -314,8 +417,8 @@ PanelWindow {
         volumeLevel = vol;
         volumeMuted = muted;
         if (changed) {
-            volumeHud = true;
-            volumeHudTimer.restart();
+            showHud({icon: papirusIcon("panel", "audio-volume-" + (muted ? "muted" : vol < 0.34 ? "low" : vol < 0.67 ? "medium" : "high")),
+                     level: Math.min(1, vol), value: volumeLabel, dim: muted});
         }
     }
     onAudioReadyChanged: syncVolume()
@@ -327,10 +430,117 @@ PanelWindow {
         function onVolumeChanged() { root.syncVolume(); }
         function onMutedChanged() { root.syncVolume(); }
     }
+
+    // Brightness: file sysfs tidak mengirim notifikasi perubahan, jadi dibaca berkala.
+    property string backlightDir: ""
+    property real brightnessMax: 0
+    property real brightnessLevel: -1
+
+    function syncBrightness(raw) {
+        if (!(raw >= 0) || brightnessMax <= 0) return;
+        let level = raw / brightnessMax;
+        let changed = brightnessLevel >= 0 && Math.abs(level - brightnessLevel) > 0.002;
+        brightnessLevel = level;
+        if (changed && hudArmed) {
+            showHud({icon: papirusIcon("apps", "brightness-systray"), level: level, value: Math.round(level * 100) + "%"});
+        }
+    }
+
+    Process {
+        command: ["sh", "-c", "for d in /sys/class/backlight/*; do [ -r \"$d/brightness\" ] && echo \"$d\" && cat \"$d/max_brightness\" && break; done"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let lines = text.trim().split("\n");
+                if (lines.length < 2) return;
+                root.brightnessMax = Number(lines[1]) || 0;
+                root.backlightDir = lines[0];
+            }
+        }
+    }
+    FileView {
+        id: brightnessFile
+        path: root.backlightDir ? root.backlightDir + "/brightness" : ""
+        printErrors: false
+        onLoaded: root.syncBrightness(Number(text().trim()))
+    }
     Timer {
-        id: volumeHudTimer
-        interval: 1500
-        onTriggered: root.volumeHud = false
+        interval: 250
+        repeat: true
+        running: root.backlightDir !== ""
+        onTriggered: brightnessFile.reload()
+    }
+
+    // Baterai & charger (UPower).
+    readonly property var batteryDevice: UPower.displayDevice
+    readonly property bool batteryReady: !!batteryDevice && batteryDevice.ready && batteryDevice.isLaptopBattery
+    readonly property var batteryAlertSteps: [20, 10, 5]
+    property bool powerKnown: false
+    property bool powerPlugged: false
+    property int batteryAlertedAt: 101        // ambang terendah yang sudah diperingatkan
+
+    function batteryIcon(pct, charging) {
+        let step = String(Math.min(100, Math.floor(pct / 10) * 10)).padStart(3, "0");
+        return papirusIcon("panel", "battery-" + step + (charging ? "-charging" : ""));
+    }
+
+    function applyPower(plugged, pct) {
+        if (!powerKnown || !hudArmed) {
+            powerKnown = true;
+            powerPlugged = plugged;
+            batteryAlertedAt = plugged ? 101 : batteryAlertSteps.reduce((low, step) => pct <= step ? step : low, 101);
+            return;
+        }
+        if (plugged !== powerPlugged) {
+            powerPlugged = plugged;
+            if (plugged) batteryAlertedAt = 101;
+            showHud({icon: batteryIcon(pct, plugged), text: plugged ? "Mengisi daya" : "Memakai baterai",
+                     value: pct + "%", tint: plugged ? "#22c55e" : theme.accent, duration: 2500});
+            if (plugged) playSound("pop");
+            return;
+        }
+        if (plugged) return;
+        if (pct > batteryAlertSteps[0]) batteryAlertedAt = 101;
+        let step = batteryAlertSteps.reduce((low, s) => pct <= s ? s : low, 101);
+        if (step < batteryAlertedAt) {
+            batteryAlertedAt = step;
+            showHud({icon: batteryIcon(pct, false), text: "Baterai lemah", value: pct + "%",
+                     tint: pct <= 10 ? "#ef4444" : "#f59e0b", alert: true, duration: 5000});
+            playSound("request");
+        }
+    }
+    function syncPower() {
+        if (batteryReady) applyPower(!UPower.onBattery, Math.round(batteryDevice.percentage * 100));
+    }
+    onBatteryReadyChanged: syncPower()
+    onHudArmedChanged: syncPower()
+    Connections {
+        target: UPower
+        function onOnBatteryChanged() { root.syncPower(); }
+    }
+    Connections {
+        target: root.batteryDevice
+        function onPercentageChanged() { root.syncPower(); }
+    }
+
+    // Bluetooth: tampil saat perangkat tersambung atau terputus.
+    function applyBluetooth(name, connected, battery, icon) {
+        if (!hudArmed) return;
+        showHud({icon: (icon || "").indexOf("audio") === 0 ? papirusIcon("devices", "audio-headset") : papirusIcon("panel", "bluetooth-active"),
+                 text: (name || "Perangkat") + (connected ? " tersambung" : " terputus"),
+                 value: connected && battery >= 0 ? Math.round(battery * 100) + "%" : "",
+                 dim: !connected, duration: 2500});
+    }
+    Instantiator {
+        model: Bluetooth.devices
+        delegate: Connections {
+            required property BluetoothDevice modelData
+            target: modelData
+            function onConnectedChanged() {
+                root.applyBluetooth(modelData.name || modelData.deviceName, modelData.connected,
+                                    modelData.batteryAvailable ? modelData.battery : -1, modelData.icon);
+            }
+        }
     }
 
     Timer {
@@ -350,6 +560,7 @@ PanelWindow {
         }
         // Kartu izin/pertanyaan yang sedang tampil ikut mendapat fokus keyboard.
         function open(): void {
+            if (root.quickNote) root.closeQuickNote();
             root.kbdMode = true;
             if (root.notifyType !== "request" && root.notifyType !== "approval") {
                 root.isNotifying = false;
@@ -358,6 +569,7 @@ PanelWindow {
             }
         }
         function close(): void {
+            if (root.quickNote) root.closeQuickNote();
             root.kbdMode = false;
             root.islandExpanded = false;
         }
@@ -366,6 +578,10 @@ PanelWindow {
             return JSON.stringify({expanded: root.islandExpanded, keyboard: root.kbdMode, tab: root.activeTab,
                                    notify: root.notifyType, pending: root.agentRequests.length,
                                    hermes: root.hermesConnected, sessions: root.agentSessions.length});
+        }
+        // Catatan cepat; panggil lagi untuk menutup.
+        function note(): string {
+            return root.openQuickNote();
         }
         function tab(name: string): string {
             if (root.tabKeys.indexOf(name) < 0) return "tab tidak dikenal: " + name + " (" + root.tabKeys.join(", ") + ")";
@@ -411,10 +627,7 @@ PanelWindow {
         if (g) lastTabInGroup[g] = key;
         if (key === "notes") fetchNotesProcess.running = true;
         else if (key === "status") fetchSysInfoProcess.running = true;
-        else if (key === "usage") fetchUsageProcess.running = true;
-        else if (key === "projects") fetchProjectsProcess.running = true;
         else if (key === "dev") sendBridgeCommand({ action: "dev_status" });
-        else if (key === "interview") sendBridgeCommand({ action: "interview_status" });
     }
 
     function cycleTab(step) {
@@ -429,7 +642,7 @@ PanelWindow {
     // Keyboard: kartu izin (Y izinkan, N tolak, A selalu, T terminal; sengaja bukan
     // Enter, supaya Enter yang diketik untuk jendela lain tidak memberi izin),
     // pertanyaan (1-9 pilih, Enter lanjut, Backspace kembali), approval Hermes
-    // (Y/N), dan panel (1-4 grup, 5 Interview, ←→ / Tab pindah tab, Esc tutup).
+    // (Y/N), dan panel (1-4 grup, ←→ / Tab pindah tab, Esc tutup).
     function handleKey(event) {
         let k = event.key;
         if (notifyType === "approval") {
@@ -456,7 +669,6 @@ PanelWindow {
         } else if (islandExpanded && !isNotifying) {
             if (k === Qt.Key_Escape) { kbdMode = false; islandExpanded = false; }
             else if (k >= Qt.Key_1 && k < Qt.Key_1 + tabGroups.length) selectGroup(k - Qt.Key_1);
-            else if (k === Qt.Key_1 + tabGroups.length) selectTab("interview");
             else if (k === Qt.Key_Right || k === Qt.Key_Tab) cycleTab(1);
             else if (k === Qt.Key_Left || k === Qt.Key_Backtab) cycleTab(-1);
             else return;
@@ -473,7 +685,7 @@ PanelWindow {
     property string activeDetail: "Ready for tasks"
     property color statusColor: "#22c55e"
     // Warna robot besar di panel terbuka mengikuti menu aktif; island tertutup tetap pilihan pengguna.
-    readonly property var menuAvatars: ({agent: "white", work: "strobi", system: "green", notes: "citrus", music: "kirby", interview: "amber"})
+    readonly property var menuAvatars: ({agent: "white", work: "strobi", system: "green", notes: "citrus", music: "kirby"})
     readonly property string menuAvatar: settings.avatarAuto ? (menuAvatars[groupOf(activeTab) || activeTab] || avatarModel) : avatarModel
     readonly property string avatarModel: settings.avatar // "white" | "strobi" | "nova" | "citrus" | "kirby"
     property string avatarExpression: "proud" // "proud" | "happy" | "working" | "celebrate" | "idle" | "angry" | "dizzy" | "wave" | "task_start"
@@ -562,20 +774,6 @@ PanelWindow {
         }
         return -1;
     }
-
-    // 9Router Usage State
-    property int usageRequests: 0
-    property real usageCost: 0.0
-    property int usageTokens: 0
-    property bool usageAvailable: false
-    property bool usageLoaded: false
-
-    property int usage60dRequests: 0
-    property real usage60dCost: 0.0
-    property int usage60dTokens: 0
-
-    property var activeModelsList: []
-    property var recentLogsList: []
 
     // System Monitor State (untuk Tab Status)
     property int sysCpu: 0
@@ -1034,16 +1232,20 @@ PanelWindow {
     // project, duration, error}. Approval yang terbuka tidak boleh tertimpa, dan
     // island yang sedang dibuka pengguna tidak direbut (status saja yang berubah).
     function showNotification(type, opts) {
+        if (quickNote) {
+            if (type !== "approval") return;
+            closeQuickNote();
+        }
         if ((notifyType === "approval" || notifyType === "request") && type !== "approval") return;
         if (type === "done") playSound(opts.error ? "error" : "done");
         else if (type === "approval" || type === "agent_wait") playSound("request");
-        else if (type === "task_start" || type === "interview" || (type === "voice" && opts.expression === "wave")) playSound("pop");
+        else if (type === "task_start" || (type === "voice" && opts.expression === "wave")) playSound("pop");
         currentStatus = opts.title;
         activeDetail = opts.detail || "";
         statusColor = opts.color;
         let timers = {task_start: taskStartNotifyTimer, done: completionCollapseTimer,
                       agent_wait: agentNotifyTimer, info: infoNotifyTimer,
-                      interview: interviewNotifyTimer, greet: greetNotifyTimer, voice: voiceNotifyTimer};
+                      greet: greetNotifyTimer, voice: voiceNotifyTimer};
         for (let key in timers) timers[key].stop();
         if (type !== "approval" && (capsuleHover.hovered || windowHover.hovered)) {
             timers[type].restart();
@@ -1070,7 +1272,7 @@ PanelWindow {
     // Tampilkan request terdepan di antrean, atau tutup kartu bila antrean kosong.
     // Approval Hermes selalu didahulukan; kartu muncul lagi setelah approval selesai.
     function refreshRequestView() {
-        if (notifyType === "approval") return;
+        if (notifyType === "approval" || quickNote) return;
         let req = currentRequest;
         if (!req) {
             if (notifyType === "request") {
@@ -1271,7 +1473,7 @@ PanelWindow {
         // (notes/media refresh); sisanya — termasuk dev server — harus kasih
         // umpan balik supaya sekali klik langsung terasa.
         const silent = ["Notes saved", "Command completed", "Status dev server diperbarui",
-                        "Status interview diperbarui", "Membuat jawaban…", "Status suara diperbarui", "Memproses perintah…"];
+                        "Membuat jawaban…", "Status suara diperbarui", "Memproses perintah…"];
         if (ok && (!message || silent.indexOf(message) !== -1)) return;
         toastPrevStatus = currentStatus;
         toastPrevDetail = activeDetail;
@@ -1295,6 +1497,7 @@ PanelWindow {
 
     function applyNotes(notes) {
         if (!Array.isArray(notes)) return;
+        notesLoaded = true;
         notesModel.clear();
         for (let n of notes) {
             if (!n || typeof n.text !== "string") continue;
@@ -1468,32 +1671,12 @@ PanelWindow {
             showActionToast(!!msg.ok, msg.message || "");
             break;
 
+        case "DevServerDied":
+            root.devServerDied(msg);
+            break;
+
         case "DevServerStatus":
             root.devServers = Array.isArray(msg.projects) ? msg.projects : [];
-            break;
-
-        case "InterviewStatus":
-            root.interviewState = msg.state || "idle";
-            root.interviewSource = msg.source || root.interviewSource;
-            root.interviewAuto = msg.auto !== false;
-            root.interviewMessage = msg.message || "";
-            root.interviewProfile = msg.profile || "";
-            if (!root.interviewRunning) { root.interviewLevel = 0; root.interviewSpeaking = false; root.interviewThinking = false; }
-            break;
-
-        case "InterviewLevel":
-            root.interviewLevel = Number(msg.level) || 0;
-            root.interviewSpeaking = !!msg.speaking;
-            break;
-
-        case "InterviewTranscript": {
-            let lines = root.interviewTranscript.concat([{ seq: msg.seq, text: msg.text || "", time: msg.time || "" }]);
-            root.interviewTranscript = lines.slice(-60);
-            break;
-        }
-
-        case "InterviewAnswer":
-            root.handleInterviewAnswer(msg);
             break;
 
         case "VoiceStatus": {
@@ -1627,23 +1810,6 @@ PanelWindow {
                 list.push(sess);
             }
             if (changed) root.agentSessions = list;
-        }
-    }
-
-    // Pill "Jawaban siap" (Interview Assist): cukup lama untuk membaca kalimat inti.
-    Timer {
-        id: interviewNotifyTimer
-        interval: 8000
-        repeat: false
-        onTriggered: {
-            if (root.notifyType === "request") return;
-            if (root.notifyType === "interview") {
-                root.isNotifying = false;
-                root.notifyType = "";
-                root.restoreBaseline();
-            } else if (root.currentStatus === "💡 Jawaban siap") {
-                root.restoreBaseline();
-            }
         }
     }
 
@@ -1782,49 +1948,9 @@ PanelWindow {
         }
     }
 
-    // Process untuk Fetch 9Router Usage
-    Process {
-        id: fetchUsageProcess
-        command: ["python3", root.appDir + "bridge_client.py", "get", "/usage"]
-        running: false
-        stdout: SplitParser {
-            onRead: data => {
-                try {
-                    let u = JSON.parse(data);
-                    root.usageLoaded = true;
-                    root.usageAvailable = !!u.available;
-                    if (u.today) {
-                        root.usageRequests = u.today.requests || 0;
-                        root.usageCost = u.today.cost || 0.0;
-                        root.usageTokens = u.today.tokens || 0;
-                    }
-                    if (u.all60d) {
-                        root.usage60dRequests = u.all60d.requests || 0;
-                        root.usage60dCost = u.all60d.cost || 0.0;
-                        root.usage60dTokens = u.all60d.tokens || 0;
-                    }
-                    if (u.activeModels) {
-                        root.activeModelsList = u.activeModels;
-                    }
-                    if (u.recentLogs) {
-                        root.recentLogsList = u.recentLogs;
-                    }
-                } catch(e) {}
-            }
-        }
-    }
-
-    // Git & Web Projects Portal State
-    property var gitProjectsList: []
-    property string activeGitProjectId: ""
-
     // Dev Server State (php artisan serve / npm run dev, dikelola bridge)
     property var devServers: []
 
-    // Interview Assist (interview.py: rekam lawan bicara -> Whisper -> saran jawaban)
-    property string interviewState: "idle"    // idle | loading | listening | error
-    property string interviewSource: "system" // system (Zoom/Meet) | mic (tatap muka)
-    property bool interviewAuto: true
     // Perintah suara: off | loading | standby | awake | thinking | speaking | error
     property string voiceState: "off"
     property string voiceMessage: ""
@@ -1834,74 +1960,13 @@ PanelWindow {
         settings.voice = enabled;
         sendBridgeCommand({ action: enabled ? "voice_start" : "voice_stop" });
     }
-    property string interviewMessage: ""
-    property string interviewProfile: ""
-    property real interviewLevel: 0
-    property bool interviewSpeaking: false
-    property var interviewTranscript: []      // [{seq, text, time}] terbaru di akhir
-    property var interviewAnswers: []         // [{qid, question, text, done, error}] terbaru di awal
-    property int interviewAnswerIndex: 0      // 0 = jawaban terbaru
-    property bool interviewThinking: false
-    readonly property bool interviewRunning: interviewState === "loading" || interviewState === "listening"
-    readonly property var interviewShownAnswer: interviewAnswers.length > interviewAnswerIndex ? interviewAnswers[interviewAnswerIndex] : null
 
-    Process {
-        id: fetchProjectsProcess
-        command: ["python3", root.appDir + "bridge_client.py", "get", "/projects"]
-        running: false
-        stdout: SplitParser {
-            onRead: data => {
-                try {
-                    let d = JSON.parse(data);
-                    if (d.projects) root.gitProjectsList = d.projects;
-                    if (d.active_id) root.activeGitProjectId = d.active_id;
-                } catch(e) {}
-            }
-        }
-    }
-
-    Timer {
-        id: projectsPollTimer
-        interval: 8000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            if (root.islandExpanded && root.activeTab === "projects") {
-                fetchProjectsProcess.running = true;
-            }
-        }
-    }
-
-    // 1234 → "1.2K", 1234567 → "1.2M", 1.5e9 → "1.50B"
-    function formatTokens(n) {
-        n = Number(n) || 0;
-        if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
-        if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-        if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
-        return "" + n;
-    }
-
-    // Tab Status & 9Router ikut segar selama terbuka (sebelumnya hanya saat tab diklik).
+    // Tab Status ikut segar selama terbuka (sebelumnya hanya saat tab diklik).
     Timer {
         interval: 3000
-        running: root.islandExpanded && !root.isNotifying
-                 && (root.activeTab === "status" || root.activeTab === "usage")
+        running: root.islandExpanded && !root.isNotifying && root.activeTab === "status"
         repeat: true
-        onTriggered: {
-            if (root.activeTab === "status") fetchSysInfoProcess.running = true;
-            else fetchUsageProcess.running = true;
-        }
-    }
-
-    function openWebUrl(url) {
-        if (!url || url === "") return;
-        sendBridgeCommand({action: "launch", name: "open_url", url: url});
-    }
-
-    function openProjectInCode(path) {
-        if (!path || path === "") return;
-        sendBridgeCommand({action: "launch", name: "open_project", path: path});
+        onTriggered: fetchSysInfoProcess.running = true
     }
 
     function launchTool(name) {
@@ -1909,6 +1974,13 @@ PanelWindow {
     }
 
     // ---- Dev Server helpers ----
+    // Server yang mati sendiri; Stop dari island tidak sampai ke sini.
+    function devServerDied(msg) {
+        playSound("error");
+        showNotification("info", {title: "Dev server mati", detail: (msg.name || msg.project) + " · " + (msg.label || msg.service),
+                                  color: "#ef4444", expression: "dizzy"});
+    }
+
     function devProject(projectId) {
         for (let i = 0; i < root.devServers.length; i++) {
             if (root.devServers[i].id === projectId) return root.devServers[i];
@@ -1941,39 +2013,6 @@ PanelWindow {
         sendBridgeCommand({ action: "dev_stop", project: projectId });
     }
 
-    function interviewToggle() {
-        if (root.interviewRunning) {
-            sendBridgeCommand({ action: "interview_stop" });
-        } else {
-            root.interviewTranscript = [];
-            root.interviewAnswers = [];
-            root.interviewAnswerIndex = 0;
-            sendBridgeCommand({ action: "interview_start", source: root.interviewSource, auto: root.interviewAuto });
-        }
-    }
-
-    function handleInterviewAnswer(msg) {
-        let list = root.interviewAnswers.slice();
-        let idx = list.findIndex(a => a.qid === msg.qid);
-        if (msg.skipped) {
-            if (idx >= 0) list.splice(idx, 1);
-        } else {
-            let item = { qid: msg.qid, question: msg.question || "", text: msg.text || "",
-                         done: !!msg.done, error: msg.error || "" };
-            if (idx >= 0) list[idx] = item;
-            else { list.unshift(item); root.interviewAnswerIndex = 0; }
-        }
-        root.interviewAnswers = list.slice(0, 20);
-        root.interviewThinking = !msg.done;
-        // Jawaban siap: kabari lewat pill kecuali tab Interview sedang terbuka.
-        if (msg.done && !msg.skipped && !msg.error && msg.text
-                && !(root.islandExpanded && root.activeTab === "interview")) {
-            let core = msg.text.split("\n").map(l => l.trim()).filter(l => l.length > 0)[0] || msg.text;
-            root.showNotification("interview", {title: "💡 Jawaban siap", detail: core,
-                                                color: "#3b82f6", expression: "happy"});
-        }
-    }
-
     // Area hover + mask SELURUH WINDOW saat terbuka: pointer bebas bergerak di
     // margin panel tanpa membuat island kolaps, dan klik tidak jatuh tembus.
     HoverHandler {
@@ -1998,9 +2037,10 @@ PanelWindow {
     property string focusedAppId: ""
     property bool focusedFullscreen: false
     readonly property bool browserFocused: /chrom|firefox|brave|zen|vivaldi|edge|librewolf|floorp|thorium|opera/i.test(focusedAppId)
-    readonly property bool islandMini: browserFocused && !focusedFullscreen && !islandExpanded && !isNotifying && !volumeHud
+    readonly property bool islandMini: browserFocused && !focusedFullscreen && !islandExpanded && !isNotifying && !hudVisible && !quickNote
     readonly property bool islandHidden: focusedFullscreen && !islandExpanded
                                          && notifyType !== "approval" && notifyType !== "request"
+                                         && !(hudOn && hudAlert) && !quickNote
 
     function handleNiriEvent(line) {
         let ev;
@@ -2076,18 +2116,20 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: 200 } }
 
         width: {
+            if (root.quickNote) return 440;
             if (root.islandExpanded && !root.isNotifying) return 660;
             if (root.isNotifying) return (root.notifyType === "approval" || root.notifyType === "request") ? 600 : 500;
-            if (root.volumeHudOn) return 240;
+            if (root.hudOn) return root.hudLevel >= 0 ? 240 : Math.min(360, hudRow.implicitWidth + 36);
             if (root.islandMini) return 120;
             if (root.showMiniPlayer) return Math.min(440, standbyRow.implicitWidth + 32);
             return 240;
         }
 
         height: {
+            if (root.quickNote) return 44;
             if (root.islandExpanded && !root.isNotifying) return 300;
             if (root.notifyType === "request") return Math.min(404, requestCard.implicitHeight + 30);
-            if (root.isNotifying) return (root.notifyType === "approval" || root.notifyType === "interview" || root.notifyType === "voice") ? 64 : 60;
+            if (root.isNotifying) return (root.notifyType === "approval" || root.notifyType === "voice") ? 64 : 60;
             if (root.islandMini) return 8;
             return 44;
         }
@@ -2167,16 +2209,9 @@ PanelWindow {
             onHoveredChanged: {
                 if (hovered) {
                     autoCloseTimer.stop();
-                    if (root.isNotifying && root.notifyType === "interview") {
-                        interviewNotifyTimer.stop();
-                        root.isNotifying = false;
-                        root.notifyType = "";
-                        root.restoreBaseline();
-                        root.activeTab = "interview";
-                    }
                     if (root.islandMini) {
                         miniExpandTimer.restart();
-                    } else if (!root.isNotifying) {
+                    } else if (!root.isNotifying && !root.quickNote) {
                         root.islandExpanded = true;
                     }
                 } else {
@@ -2229,7 +2264,7 @@ PanelWindow {
             // 1. TAMPILAN STANDBY BIASA
             Row {
                 id: standbyRow
-                visible: !root.isNotifying && !root.islandExpanded && !root.islandMini && !root.volumeHudOn
+                visible: !root.isNotifying && !root.islandExpanded && !root.islandMini && !root.hudOn && !root.quickNote
                 anchors.centerIn: parent
                 spacing: 12
 
@@ -2352,9 +2387,10 @@ PanelWindow {
                 }
             }
 
-            // HUD VOLUME: muncul sebentar di capsule saat volume atau mute berubah.
+            // HUD SISTEM: bar (volume, brightness) atau teks (charger, baterai, Bluetooth).
             RowLayout {
-                visible: root.volumeHudOn
+                id: hudRow
+                visible: root.hudOn
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
@@ -2364,11 +2400,10 @@ PanelWindow {
                     Layout.preferredWidth: 18
                     Layout.preferredHeight: 18
                     sourceSize: Qt.size(18, 18)
-                    source: "file:///usr/share/icons/Papirus/24x24/panel/audio-volume-"
-                            + (root.volumeMuted ? "muted" : root.volumeLevel < 0.34 ? "low" : root.volumeLevel < 0.67 ? "medium" : "high") + ".svg"
+                    source: root.hudIcon
                 }
                 Rectangle {
-                    id: volumeTrack
+                    visible: root.hudLevel >= 0
                     Layout.fillWidth: true
                     implicitHeight: 6
                     radius: 3
@@ -2376,18 +2411,71 @@ PanelWindow {
                     Rectangle {
                         height: parent.height
                         radius: 3
-                        width: parent.width * Math.min(1, root.volumeLevel)
-                        color: root.volumeMuted ? root.theme.subtext0 : root.theme.accent
+                        width: parent.width * Math.max(0, root.hudLevel)
+                        color: root.hudDim ? root.theme.subtext0 : root.hudTint
                         Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                     }
                 }
                 UiText {
-                    Layout.preferredWidth: 38
-                    horizontalAlignment: Text.AlignRight
-                    text: root.volumeLabel
-                    color: root.volumeMuted ? root.theme.subtext1 : root.theme.text
+                    visible: root.hudLevel < 0
+                    Layout.fillWidth: true
+                    text: root.hudText
+                    color: root.hudDim ? root.theme.subtext1 : root.theme.text
                     font.pixelSize: 12
                     font.bold: true
+                    elide: Text.ElideRight
+                }
+                UiText {
+                    visible: text !== ""
+                    Layout.preferredWidth: root.hudLevel >= 0 ? 38 : implicitWidth
+                    horizontalAlignment: Text.AlignRight
+                    text: root.hudValue
+                    color: root.hudDim ? root.theme.subtext1 : (root.hudLevel >= 0 ? root.theme.text : root.hudTint)
+                    font.pixelSize: 12
+                    font.bold: true
+                }
+            }
+
+            // CATATAN CEPAT: capsule menjadi kolom teks.
+            RowLayout {
+                visible: root.quickNote
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 8
+
+                Image {
+                    Layout.preferredWidth: 16
+                    Layout.preferredHeight: 16
+                    sourceSize: Qt.size(16, 16)
+                    source: root.papirusIcon("actions", "document-edit")
+                }
+                TextField {
+                    id: quickNoteField
+                    renderType: Text.NativeRendering
+                    font.hintingPreference: Font.PreferFullHinting
+                    font.family: root.uiFont
+                    font.pixelSize: 13
+                    font.weight: Font.Medium
+                    Layout.fillWidth: true
+                    placeholderText: "Catatan cepat…"
+                    placeholderTextColor: root.theme.subtext0
+                    color: root.theme.text
+                    background: null
+                    leftPadding: 0; rightPadding: 0; topPadding: 2; bottomPadding: 2
+                    onTextChanged: if (quickNoteIdle.running) quickNoteIdle.restart()
+                    Keys.onReturnPressed: root.submitQuickNote()
+                    Keys.onEnterPressed: root.submitQuickNote()
+                    Keys.onEscapePressed: event => { root.closeQuickNote(); event.accepted = true; }
+                }
+                UiText {
+                    readonly property bool warn: root.agentRequests.length > 0 || !root.notesLoaded
+                    text: !root.notesLoaded ? "Memuat catatan…"
+                        : root.agentRequests.length > 0 ? "Izin menunggu"
+                        : quickNoteField.text.trim() ? (root.noteType(quickNoteField.text, "") === "cmd" ? "Command" : "Memo") + " · Enter"
+                        : "Esc"
+                    color: warn ? "#f97316" : root.theme.subtext0
+                    font.pixelSize: 10
                 }
             }
 
@@ -2518,8 +2606,8 @@ PanelWindow {
                         text: root.activeDetail
                         color: root.theme.textDim
                         font.pixelSize: 11
-                        // Command approval / kalimat inti jawaban interview: sampai 2 baris.
-                        readonly property bool twoLines: root.notifyType === "approval" || root.notifyType === "interview" || root.notifyType === "voice"
+                        // Command approval: sampai 2 baris.
+                        readonly property bool twoLines: root.notifyType === "approval" || root.notifyType === "voice"
                         elide: Text.ElideRight
                         wrapMode: twoLines ? Text.WrapAtWordBoundaryOrAnywhere : Text.NoWrap
                         maximumLineCount: twoLines ? 2 : 1
@@ -3140,6 +3228,8 @@ PanelWindow {
                             }
 
                             Row {
+                                // Status koneksi Hermes tidak ditampilkan; titik di chip Agent sudah cukup.
+                                visible: root.currentStatus !== "Hermes Offline" && root.currentStatus !== "Menghubungi Hermes…"
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 spacing: 5
                                 Rectangle {
@@ -3275,7 +3365,7 @@ PanelWindow {
                     }
                 }
 
-                // PANEL KANAN: TAB NAVIGASI & KONTEN (CATATAN / STATUS / 9ROUTER)
+                // PANEL KANAN: TAB NAVIGASI & KONTEN (CATATAN / STATUS / TOOLS)
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -3284,7 +3374,7 @@ PanelWindow {
                     clip: true
                     spacing: 8
 
-                    // Navigasi: 4 grup + sub-tab grup aktif sebaris, Interview di kanan.
+                    // Navigasi: 4 grup + sub-tab grup aktif sebaris.
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 4
@@ -3387,33 +3477,6 @@ PanelWindow {
                             }
                         }
 
-                        // Interview: mode khusus; bingkai + titik merah saat merekam.
-                        Rectangle {
-                            id: ivNavBtn
-                            readonly property bool active: root.activeTab === "interview"
-                            implicitWidth: ivNavRow.implicitWidth + 10
-                            implicitHeight: 26
-                            radius: 6
-                            color: active ? root.theme.surface1 : (ivNavHover.containsMouse ? root.theme.surface0 : "transparent")
-                            border.color: root.interviewRunning ? "#ef4444" : "transparent"
-                            Row {
-                                id: ivNavRow
-                                anchors.centerIn: parent
-                                spacing: 4
-                                Rectangle {
-                                    visible: root.interviewRunning
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 6; height: 6; radius: 3
-                                    color: "#ef4444"
-                                }
-                                UiText { text: "Interview"; color: ivNavBtn.active ? "#fff" : root.theme.subtext0; font.pixelSize: 11; font.bold: true }
-                            }
-                            MouseArea {
-                                id: ivNavHover
-                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: root.selectTab("interview")
-                            }
-                        }
                     }
 
                 // TAB MUSIK: NOW PLAYING + LIRIK TERSINKRON (LRCLIB)
@@ -3733,51 +3796,38 @@ PanelWindow {
                     RowLayout {
                         visible: !notesTabCol.editing
                         Layout.fillWidth: true
-                        spacing: 4
+                        spacing: 8
 
-                        Repeater {
-                            model: [
+                        HoverHandler { id: notesHeadHover }
+
+                        NoteSegments {
+                            theme: root.theme
+                            items: [
                                 { key: "all", label: "Semua" },
                                 { key: "cmd", label: "Command" },
                                 { key: "task", label: "Task" },
                                 { key: "note", label: "Memo" }
                             ]
-                            Rectangle {
-                                required property var modelData
-                                readonly property bool active: notesTabCol.filterTag === modelData.key
-                                implicitWidth: filterChipTxt.implicitWidth + 16
-                                implicitHeight: 22
-                                radius: 11
-                                color: active ? root.theme.surface1 : "transparent"
-                                border.color: active ? root.theme.surface2 : root.theme.surface1
-                                UiText {
-                                    id: filterChipTxt
-                                    anchors.centerIn: parent
-                                    text: parent.modelData.label
-                                    color: parent.active ? "#ffffff" : root.theme.subtext0
-                                    font.pixelSize: 11; font.bold: true
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: notesTabCol.filterTag = parent.modelData.key
-                                }
-                            }
+                            current: notesTabCol.filterTag
+                            onPicked: key => notesTabCol.filterTag = key
                         }
 
                         Item { Layout.fillWidth: true }
 
+                        // Jumlah catatan; aksi hapus baru muncul saat header disorot.
                         // Klik pertama minta konfirmasi; klik kedua (≤3 dtk) baru menghapus.
                         UiText {
                             visible: notesModel.count > 0
-                            text: notesTabCol.confirmClear ? "Yakin hapus semua?" : "Hapus semua"
-                            color: notesTabCol.confirmClear ? "#fca5a5" : (clearAllHover.containsMouse ? root.theme.textDim : root.theme.subtext0)
-                            font.pixelSize: 11; font.bold: true
-                            Layout.rightMargin: 4
+                            readonly property bool armed: notesHeadHover.hovered || notesTabCol.confirmClear
+                            text: notesTabCol.confirmClear ? "Yakin hapus semua?"
+                                : (notesHeadHover.hovered ? "Hapus semua" : notesTabCol.cards.length + " catatan")
+                            color: notesTabCol.confirmClear || clearAllHover.containsMouse ? "#f87171" : root.theme.subtext0
+                            font.pixelSize: 11
                             MouseArea {
                                 id: clearAllHover
                                 anchors.fill: parent
                                 anchors.margins: -4
+                                enabled: parent.armed
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
@@ -3799,18 +3849,16 @@ PanelWindow {
                             }
                         }
 
+                        // Catatan baru
                         Rectangle {
-                            implicitWidth: newNoteTxt.implicitWidth + 18
-                            implicitHeight: 24
-                            radius: 12
-                            color: newNoteHover.containsMouse ? Qt.lighter(root.theme.surface2, 1.2) : root.theme.surface2
-                            UiText {
-                                id: newNoteTxt
-                                anchors.centerIn: parent
-                                text: "+  Catatan baru"
-                                color: "#ffffff"
-                                font.pixelSize: 11; font.bold: true
-                            }
+                            implicitWidth: 26
+                            implicitHeight: 26
+                            radius: 13
+                            color: root.theme.accent
+                            scale: newNoteHover.pressed ? 0.92 : (newNoteHover.containsMouse ? 1.06 : 1.0)
+                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                            Rectangle { anchors.centerIn: parent; width: 12; height: 2; radius: 1; color: root.theme.base }
+                            Rectangle { anchors.centerIn: parent; width: 2; height: 12; radius: 1; color: root.theme.base }
                             MouseArea {
                                 id: newNoteHover
                                 anchors.fill: parent
@@ -3821,17 +3869,159 @@ PanelWindow {
                         }
                     }
 
-                    GridView {
-                        id: notesGrid
+                    Item {
                         visible: !notesTabCol.editing
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        clip: true
-                        model: notesTabCol.cards
-                        cellWidth: Math.floor(width / 3)
-                        cellHeight: 98
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        GridView {
+                            id: notesGrid
+                            anchors.fill: parent
+                            anchors.leftMargin: -3
+                            anchors.rightMargin: -3
+                            clip: true
+                            model: notesTabCol.cards
+                            cellWidth: Math.floor(width / 2)
+                            cellHeight: 86
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                                background: null
+                                contentItem: Rectangle {
+                                    implicitWidth: 3
+                                    radius: 2
+                                    color: root.theme.surface2
+                                    opacity: parent.active ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+                                }
+                            }
+
+                            delegate: Item {
+                                id: noteCard
+                                required property var modelData   // indeks di notesModel
+                                readonly property var note: { root.notesRevision; return notesModel.get(modelData) || ({id: "", text: "", tag: "note", title: "", color: "", time: "", done: false}); }
+                                readonly property string type: root.noteType(note.text, note.tag)
+                                readonly property color accent: root.noteAccent(note.color)
+                                // Tanpa judul: baris pertama jadi judul, kecuali command yang tampil utuh.
+                                readonly property bool firstLineHeading: !note.title && type !== "cmd"
+                                readonly property var lines: note.text.split("\n")
+                                readonly property string heading: note.title || (firstLineHeading ? lines[0] : "")
+                                readonly property string preview: firstLineHeading ? lines.slice(1).join(" ").trim() : note.text
+                                width: notesGrid.cellWidth
+                                height: notesGrid.cellHeight
+
+                                Rectangle {
+                                    id: cardBody
+                                    anchors.fill: parent
+                                    anchors.margins: 3
+                                    radius: 14
+                                    color: Qt.tint(cardHover.hovered ? root.theme.surface1 : root.theme.surface0,
+                                                   Qt.rgba(noteCard.accent.r, noteCard.accent.g, noteCard.accent.b, noteCard.note.color ? 0.09 : 0))
+                                    opacity: noteCard.note.done ? 0.5 : 1.0
+                                    scale: cardTap.pressed ? 0.98 : 1.0
+                                    Behavior on scale { NumberAnimation { duration: 90 } }
+                                    Behavior on color { ColorAnimation { duration: 120 } }
+                                    HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
+                                    MouseArea {
+                                        id: cardTap
+                                        anchors.fill: parent
+                                        onClicked: notesTabCol.openNote(noteCard.note.id)
+                                    }
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 12
+                                        anchors.rightMargin: 12
+                                        anchors.topMargin: 9
+                                        anchors.bottomMargin: 8
+                                        spacing: 2
+
+                                        UiText {
+                                            visible: text !== ""
+                                            text: noteCard.heading
+                                            color: root.theme.text
+                                            font.pixelSize: 12; font.bold: true
+                                            font.strikeout: !!noteCard.note.done
+                                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                            maximumLineCount: noteCard.preview ? 1 : 2
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        UiText {
+                                            visible: text !== ""
+                                            text: noteCard.preview
+                                            color: noteCard.type === "cmd" ? root.theme.textDim : root.theme.subtext1
+                                            font.pixelSize: 11
+                                            font.family: noteCard.type === "cmd" ? root.monoFont : root.uiFont
+                                            font.weight: Font.Normal
+                                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                            maximumLineCount: noteCard.heading ? 2 : 3
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Item { Layout.fillHeight: true }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+                                            Rectangle {
+                                                visible: !!noteCard.note.color
+                                                width: 6; height: 6; radius: 3
+                                                color: noteCard.accent
+                                            }
+                                            UiText {
+                                                text: (noteCard.type === "cmd" ? "Command" : (noteCard.type === "task" ? "Task" : "Memo"))
+                                                      + (noteCard.note.time ? "  ·  " + noteCard.note.time : "")
+                                                color: root.theme.subtext0
+                                                font.pixelSize: 10
+                                            }
+                                            Item { Layout.fillWidth: true; implicitHeight: 16 }
+
+                                            // Task: centang langsung dari kartu
+                                            Rectangle {
+                                                visible: noteCard.type === "task"
+                                                width: 16; height: 16; radius: 8
+                                                color: noteCard.note.done ? root.theme.accent : "transparent"
+                                                border.color: noteCard.note.done ? root.theme.accent : root.theme.subtext0
+                                                UiText {
+                                                    anchors.centerIn: parent
+                                                    visible: !!noteCard.note.done
+                                                    text: "✓"; color: root.theme.base
+                                                    font.pixelSize: 10; font.bold: true
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    anchors.margins: -3
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.toggleNoteDone(noteCard.modelData)
+                                                }
+                                            }
+
+                                            // Command: jalankan di terminal langsung dari kartu
+                                            Rectangle {
+                                                visible: noteCard.type === "cmd"
+                                                width: 18; height: 18; radius: 9
+                                                color: runHover.containsMouse ? root.theme.accent : root.theme.surface2
+                                                MediaGlyph {
+                                                    anchors.centerIn: parent
+                                                    anchors.horizontalCenterOffset: 1
+                                                    width: 7; height: 7
+                                                    kind: "play"
+                                                    tint: runHover.containsMouse ? root.theme.base : root.theme.text
+                                                }
+                                                MouseArea {
+                                                    id: runHover
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.runCommandNote(noteCard.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         Column {
                             anchors.centerIn: parent
@@ -3844,136 +4034,21 @@ PanelWindow {
                             }
                             UiText {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: "Klik “+ Catatan baru” untuk mulai menulis"
+                                text: "Tekan + untuk mulai menulis"
                                 color: root.theme.subtext0; font.pixelSize: 11
                             }
                         }
 
-                        delegate: Item {
-                            id: noteCard
-                            required property var modelData   // indeks di notesModel
-                            readonly property var note: { root.notesRevision; return notesModel.get(modelData) || ({id: "", text: "", tag: "note", title: "", color: "", time: "", done: false}); }
-                            readonly property string type: root.noteType(note.text, note.tag)
-                            readonly property color accent: root.noteAccent(note.color)
-                            // Tanpa judul: memo multi-baris memakai baris pertama sebagai judul,
-                            // selain itu seluruh isi tampil sebagai teks kartu.
-                            readonly property bool firstLineHeading: !note.title && type !== "cmd" && note.text.indexOf("\n") > 0
-                            readonly property string heading: note.title || (firstLineHeading ? note.text.split("\n")[0] : "")
-                            readonly property string preview: firstLineHeading ? note.text.split("\n").slice(1).join("\n") : note.text
-                            width: notesGrid.cellWidth
-                            height: notesGrid.cellHeight
-
-                            Rectangle {
-                                id: cardBody
-                                anchors.fill: parent
-                                anchors.margins: 4
-                                radius: 10
-                                color: Qt.tint(root.theme.surface0, Qt.rgba(noteCard.accent.r, noteCard.accent.g, noteCard.accent.b, note.color ? 0.16 : 0))
-                                border.color: cardHover.hovered ? Qt.rgba(noteCard.accent.r, noteCard.accent.g, noteCard.accent.b, 0.7)
-                                                                : Qt.rgba(noteCard.accent.r, noteCard.accent.g, noteCard.accent.b, note.color ? 0.3 : 0.08)
-                                opacity: noteCard.note.done ? 0.55 : 1.0
-                                scale: cardTap.pressed ? 0.97 : 1.0
-                                Behavior on scale { NumberAnimation { duration: 90 } }
-                                Behavior on border.color { ColorAnimation { duration: 150 } }
-                                HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
-                                MouseArea {
-                                    id: cardTap
-                                    anchors.fill: parent
-                                    onClicked: notesTabCol.openNote(noteCard.note.id)
-                                }
-
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 9
-                                    spacing: 3
-
-                                    UiText {
-                                        visible: text !== ""
-                                        text: noteCard.heading
-                                        color: "#ffffff"
-                                        font.pixelSize: 12; font.bold: true
-                                        font.strikeout: !!noteCard.note.done
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                    UiText {
-                                        text: noteCard.preview
-                                        color: noteCard.type === "cmd" ? root.theme.textDim : root.theme.subtext1
-                                        font.pixelSize: noteCard.type === "cmd" ? 11 : 12
-                                        font.family: noteCard.type === "cmd" ? root.monoFont : root.uiFont
-                                        wrapMode: noteCard.type === "cmd" ? Text.WrapAnywhere : Text.Wrap
-                                        maximumLineCount: noteCard.heading ? 2 : 3
-                                        font.bold: !noteCard.heading && noteCard.type !== "cmd"
-                                        elide: Text.ElideRight
-                                        lineHeight: 1.1
-                                        Layout.fillWidth: true
-                                    }
-                                    Item { Layout.fillHeight: true }
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 5
-                                        Rectangle {
-                                            implicitWidth: cardTag.implicitWidth + 10
-                                            implicitHeight: 14
-                                            radius: 7
-                                            color: Qt.rgba(noteCard.accent.r, noteCard.accent.g, noteCard.accent.b, 0.18)
-                                            UiText {
-                                                id: cardTag
-                                                anchors.centerIn: parent
-                                                text: noteCard.type === "cmd" ? "Command" : (noteCard.type === "task" ? "Task" : "Memo")
-                                                color: noteCard.note.color ? noteCard.accent : root.theme.textDim
-                                                font.pixelSize: 10; font.bold: true
-                                            }
-                                        }
-                                        UiText {
-                                            text: noteCard.note.time || ""
-                                            color: root.theme.subtext0; font.pixelSize: 10
-                                        }
-                                        Item { Layout.fillWidth: true }
-
-                                        // Task: centang langsung dari kartu
-                                        Rectangle {
-                                            visible: noteCard.type === "task"
-                                            width: 16; height: 16; radius: 5
-                                            color: noteCard.note.done ? noteCard.accent : "transparent"
-                                            border.color: noteCard.note.done ? noteCard.accent : root.theme.overlay
-                                            UiText {
-                                                anchors.centerIn: parent
-                                                visible: !!noteCard.note.done
-                                                text: "✓"; color: "#000000"
-                                                font.pixelSize: 11; font.bold: true
-                                            }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                anchors.margins: -3
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: root.toggleNoteDone(noteCard.modelData)
-                                            }
-                                        }
-
-                                        // Command: jalankan di terminal langsung dari kartu
-                                        Rectangle {
-                                            visible: noteCard.type === "cmd"
-                                            width: 20; height: 20; radius: 10
-                                            color: runHover.containsMouse ? "#ffffff" : root.theme.surface2
-                                            MediaGlyph {
-                                                anchors.centerIn: parent
-                                                anchors.horizontalCenterOffset: 1
-                                                width: 8; height: 8
-                                                kind: "play"
-                                                tint: runHover.containsMouse ? "#000000" : "#ffffff"
-                                            }
-                                            MouseArea {
-                                                id: runHover
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: root.runCommandNote(noteCard.modelData)
-                                            }
-                                        }
-                                    }
-                                }
+                        // Kartu memudar di tepi bawah, menandakan daftar masih bisa digulir.
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 26
+                            visible: notesGrid.count > 0 && !notesGrid.atYEnd
+                            gradient: Gradient {
+                                GradientStop { position: 0; color: Qt.rgba(root.theme.base.r, root.theme.base.g, root.theme.base.b, 0) }
+                                GradientStop { position: 1; color: root.theme.base }
                             }
                         }
                     }
@@ -3984,7 +4059,8 @@ PanelWindow {
                         visible: notesTabCol.editing
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        radius: 12
+                        Layout.bottomMargin: 4
+                        radius: 16
 
                         property bool loading: false
                         property bool confirmDelete: false
@@ -3992,8 +4068,8 @@ PanelWindow {
                         readonly property string type: note ? root.noteType(note.text, note.tag) : "note"
                         readonly property color accent: root.noteAccent(note ? note.color : "")
 
-                        color: Qt.tint(root.theme.surface0, Qt.rgba(accent.r, accent.g, accent.b, note && note.color ? 0.12 : 0))
-                        border.color: Qt.rgba(accent.r, accent.g, accent.b, note && note.color ? 0.35 : 0.1)
+                        color: Qt.tint(root.theme.surface0, Qt.rgba(accent.r, accent.g, accent.b, note && note.color ? 0.09 : 0))
+                        Behavior on color { ColorAnimation { duration: 160 } }
 
                         function update(field, value) {
                             if (loading || !notesTabCol.editing) return;
@@ -4010,24 +4086,29 @@ PanelWindow {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: 10
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            anchors.topMargin: 10
+                            anchors.bottomMargin: 9
                             spacing: 6
 
-                            // Toolbar: kembali · tipe · warna · aksi
+                            // Toolbar: kembali · tipe · aksi
                             RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 8
 
                                 Rectangle {
-                                    implicitWidth: backRow.implicitWidth + 14
-                                    implicitHeight: 22
-                                    radius: 11
+                                    implicitWidth: 26
+                                    implicitHeight: 26
+                                    radius: 13
                                     color: backHoverN.containsMouse ? root.theme.surface2 : root.theme.surface1
+                                    Behavior on color { ColorAnimation { duration: 120 } }
                                     UiText {
-                                        id: backRow
                                         anchors.centerIn: parent
-                                        text: "‹  Kembali"
-                                        color: "#ffffff"; font.pixelSize: 11; font.bold: true
+                                        anchors.horizontalCenterOffset: -1
+                                        anchors.verticalCenterOffset: -1
+                                        text: "‹"
+                                        color: root.theme.text; font.pixelSize: 17; font.bold: true
                                     }
                                     MouseArea {
                                         id: backHoverN
@@ -4038,53 +4119,16 @@ PanelWindow {
                                     }
                                 }
 
-                                Repeater {
-                                    model: [
+                                NoteSegments {
+                                    theme: root.theme
+                                    color: root.theme.surface1
+                                    items: [
                                         { key: "note", label: "Memo" },
                                         { key: "task", label: "Task" },
                                         { key: "cmd", label: "Command" }
                                     ]
-                                    Rectangle {
-                                        required property var modelData
-                                        readonly property bool active: noteEditor.type === modelData.key
-                                        implicitWidth: typeTxt.implicitWidth + 14
-                                        implicitHeight: 22
-                                        radius: 11
-                                        color: active ? Qt.rgba(noteEditor.accent.r, noteEditor.accent.g, noteEditor.accent.b, 0.22) : "transparent"
-                                        border.color: active ? Qt.rgba(noteEditor.accent.r, noteEditor.accent.g, noteEditor.accent.b, 0.6) : root.theme.surface2
-                                        UiText {
-                                            id: typeTxt
-                                            anchors.centerIn: parent
-                                            text: parent.modelData.label
-                                            color: parent.active ? "#ffffff" : root.theme.subtext0
-                                            font.pixelSize: 11; font.bold: true
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: noteEditor.update("tag", parent.modelData.key)
-                                        }
-                                    }
-                                }
-
-                                Rectangle { implicitWidth: 1; implicitHeight: 14; color: root.theme.surface2 }
-
-                                Repeater {
-                                    model: root.noteColorKeys
-                                    Rectangle {
-                                        required property string modelData
-                                        readonly property bool active: (noteEditor.note ? noteEditor.note.color : "") === modelData
-                                        width: 14; height: 14; radius: 7
-                                        color: modelData ? root.noteAccent(modelData) : root.theme.surface2
-                                        border.color: active ? "#ffffff" : "transparent"
-                                        border.width: 2
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            anchors.margins: -2
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: noteEditor.update("color", parent.modelData)
-                                        }
-                                    }
+                                    current: noteEditor.type
+                                    onPicked: key => noteEditor.update("tag", key)
                                 }
 
                                 Item { Layout.fillWidth: true }
@@ -4096,19 +4140,20 @@ PanelWindow {
                                         required property string modelData
                                         readonly property bool danger: modelData === "delete"
                                         property bool copied: false
-                                        implicitWidth: edActionTxt.implicitWidth + 14
-                                        implicitHeight: 22
-                                        radius: 11
+                                        implicitWidth: edActionTxt.implicitWidth + 16
+                                        implicitHeight: 26
+                                        radius: 13
                                         color: danger && noteEditor.confirmDelete ? "#7f1d1d"
-                                             : (edActionHover.containsMouse ? root.theme.surface2 : root.theme.surface1)
+                                             : (edActionHover.containsMouse ? root.theme.surface2 : "transparent")
+                                        Behavior on color { ColorAnimation { duration: 120 } }
                                         UiText {
                                             id: edActionTxt
                                             anchors.centerIn: parent
-                                            text: edAction.modelData === "run" ? "▶  Jalankan"
-                                                : edAction.modelData === "copy" ? (edAction.copied ? "✓ Tersalin" : "Salin")
+                                            text: edAction.modelData === "run" ? "Jalankan"
+                                                : edAction.modelData === "copy" ? (edAction.copied ? "Tersalin" : "Salin")
                                                 : (noteEditor.confirmDelete ? "Yakin hapus?" : "Hapus")
-                                            color: edAction.danger ? (noteEditor.confirmDelete ? "#fecaca" : "#f87171") : "#ffffff"
-                                            font.pixelSize: 11; font.bold: true
+                                            color: edAction.danger ? (noteEditor.confirmDelete ? "#fecaca" : "#f87171") : root.theme.textDim
+                                            font.pixelSize: 11
                                         }
                                         Timer { id: copiedTimer; interval: 1500; onTriggered: edAction.copied = false }
                                         MouseArea {
@@ -4146,10 +4191,11 @@ PanelWindow {
                                 font.hintingPreference: Font.PreferFullHinting
                                 id: noteTitleField
                                 Layout.fillWidth: true
+                                Layout.topMargin: 2
                                 placeholderText: "Judul"
-                                placeholderTextColor: root.theme.overlay
-                                color: "#ffffff"
-                                font.pixelSize: 15
+                                placeholderTextColor: root.theme.subtext0
+                                color: root.theme.text
+                                font.pixelSize: 16
                                 font.bold: true
                                 font.family: root.uiFont
                                 background: null
@@ -4159,8 +4205,6 @@ PanelWindow {
                                 Keys.onEnterPressed: noteBodyArea.forceActiveFocus()
                                 Keys.onEscapePressed: event => { notesTabCol.closeEditor(); event.accepted = true; }
                             }
-
-                            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.rgba(1, 1, 1, 0.07) }
 
                             ScrollView {
                                 Layout.fillWidth: true
@@ -4172,9 +4216,10 @@ PanelWindow {
                                     id: noteBodyArea
                                     placeholderText: noteEditor.type === "cmd" ? "Perintah terminal, mis. npm run dev"
                                                    : (noteEditor.type === "task" ? "Apa yang perlu dikerjakan?" : "Tulis catatan…")
-                                    placeholderTextColor: root.theme.overlay
+                                    placeholderTextColor: root.theme.subtext0
                                     color: root.theme.textDim
-                                    font.pixelSize: noteEditor.type === "cmd" ? 11 : 12
+                                    font.pixelSize: noteEditor.type === "cmd" ? 12 : 13
+                                    font.weight: Font.Medium
                                     font.family: noteEditor.type === "cmd" ? root.monoFont : root.uiFont
                                     wrapMode: TextEdit.Wrap
                                     selectByMouse: true
@@ -4185,15 +4230,43 @@ PanelWindow {
                                 }
                             }
 
+                            // Footer: warna · status simpan
                             RowLayout {
                                 Layout.fillWidth: true
-                                UiText {
-                                    text: noteEditor.note ? "Dibuat " + (noteEditor.note.time || "-") : ""
-                                    color: root.theme.subtext0; font.pixelSize: 10
+                                spacing: 2
+
+                                Repeater {
+                                    model: root.noteColorKeys
+                                    Item {
+                                        required property string modelData
+                                        readonly property bool active: (noteEditor.note ? noteEditor.note.color : "") === modelData
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 9
+                                            color: "transparent"
+                                            border.width: parent.active ? 1 : 0
+                                            border.color: root.theme.textDim
+                                        }
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 10; height: 10; radius: 5
+                                            color: parent.modelData ? root.noteAccent(parent.modelData) : root.theme.overlay
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: noteEditor.update("color", parent.modelData)
+                                        }
+                                    }
                                 }
+
                                 Item { Layout.fillWidth: true }
+
                                 UiText {
-                                    text: noteSaveTimer.running ? "Menyimpan…" : "Tersimpan otomatis · Esc untuk kembali"
+                                    text: (noteEditor.note && noteEditor.note.time ? noteEditor.note.time + "  ·  " : "")
+                                          + (noteSaveTimer.running ? "Menyimpan…" : "Tersimpan")
                                     color: root.theme.subtext0; font.pixelSize: 10
                                 }
                             }
@@ -4222,8 +4295,18 @@ PanelWindow {
                     // Baris 1: logo tiap agent + titik status, lalu sakelar auto-izin
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.leftMargin: 2
                         spacing: 6
+
+                        // Satu baki untuk semua agent, seirama dengan filter tab Catatan.
+                        Rectangle {
+                            implicitWidth: agentTray.implicitWidth + 4
+                            implicitHeight: 26
+                            radius: 13
+                            color: root.theme.surface0
+
+                            Row {
+                                id: agentTray
+                                anchors.centerIn: parent
 
                         Repeater {
                             model: ["claude", "hermes", "opencode"]
@@ -4233,6 +4316,7 @@ PanelWindow {
                                 required property string modelData
                                 readonly property bool isHermes: modelData === "hermes"
                                 readonly property int count: root.agentSessions.filter(sess => sess.agent === modelData).length
+                                readonly property int stateCount: root.agentSessions.filter(sess => sess.agent === modelData && sess.state === state).length
                                 // Hermes: koneksi bridge; Claude/OpenCode: status terpenting dari semua sesinya.
                                 readonly property string state: isHermes
                                     ? (!root.hermesConnected ? "offline" : (root.hermesWorking ? "working" : "idle"))
@@ -4241,19 +4325,19 @@ PanelWindow {
                                     : (state === "none" ? root.theme.overlay : root.stateColor(state))
                                 readonly property bool dim: state === "none"
 
-                                implicitWidth: chipRow.implicitWidth + 16
-                                implicitHeight: 26
-                                radius: 13
+                                width: chipRow.implicitWidth + 14
+                                height: 22
+                                radius: 11
                                 color: agentChip.state === "waiting" ? Qt.rgba(0.976, 0.451, 0.086, 0.16)
-                                     : (chipHover.containsMouse ? root.theme.surface1 : root.theme.surface0)
+                                     : (chipHover.containsMouse ? root.theme.surface1 : "transparent")
                                 Behavior on color { ColorAnimation { duration: 200 } }
 
                                 Row {
                                     id: chipRow
                                     anchors.centerIn: parent
-                                    spacing: 6
+                                    spacing: 5
                                     opacity: agentChip.dim ? 0.45 : 1.0
-                                    SourceLogo { kind: agentChip.modelData; size: 15; anchors.verticalCenter: parent.verticalCenter }
+                                    SourceLogo { kind: agentChip.modelData; size: 14; anchors.verticalCenter: parent.verticalCenter }
                                     Rectangle {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 6; height: 6; radius: 3
@@ -4267,14 +4351,12 @@ PanelWindow {
                                         }
                                     }
                                     UiText {
-                                        // Label hanya untuk status yang perlu dilihat; idle/kosong cukup titik.
-                                        visible: agentChip.state === "offline" || agentChip.state === "working"
-                                                 || agentChip.state === "waiting" || agentChip.state === "error"
+                                        // Label hanya untuk yang butuh perhatian; sisanya cukup titik + tooltip.
+                                        visible: agentChip.state === "waiting" || agentChip.state === "error"
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: agentChip.state === "offline" ? "Offline"
-                                              : root.stateLabel(agentChip.state) + (agentChip.count > 1 ? " · " + agentChip.count : "")
+                                        text: root.stateLabel(agentChip.state) + (agentChip.stateCount > 1 ? " · " + agentChip.stateCount : "")
                                         color: agentChip.tint
-                                        font.pixelSize: 11; font.bold: true
+                                        font.pixelSize: 11
                                     }
                                 }
 
@@ -4294,6 +4376,8 @@ PanelWindow {
                                 }
                             }
                         }
+                            }
+                        }
 
                         Item { Layout.fillWidth: true }
 
@@ -4303,8 +4387,8 @@ PanelWindow {
                             UiText {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "Auto-izin"
-                                color: settings.autoSafe ? root.theme.text : root.theme.subtext1
-                                font.pixelSize: 11; font.bold: true
+                                color: settings.autoSafe ? root.theme.text : root.theme.subtext0
+                                font.pixelSize: 11
                             }
                             ToolTip.visible: autoSafeHover.hovered
                             ToolTip.delay: 400
@@ -4334,17 +4418,17 @@ PanelWindow {
                         readonly property color tint: sess ? root.stateColor(sess.state) : root.theme.overlay
                         readonly property bool live: !!sess && (sess.state === "working" || sess.state === "waiting")
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 56
-                        radius: 16
+                        Layout.preferredHeight: 58
+                        radius: 14
                         color: sess && sess.state === "waiting" ? Qt.rgba(0.976, 0.451, 0.086, 0.12) : root.theme.surface0
                         Behavior on color { ColorAnimation { duration: 200 } }
 
                         RowLayout {
                             visible: !!mainCard.sess
                             anchors.fill: parent
-                            anchors.leftMargin: 11
-                            anchors.rightMargin: 14
-                            spacing: 11
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 10
 
                             // Logo dalam cincin status; cincin berdenyut saat sesi aktif.
                             Item {
@@ -4353,7 +4437,7 @@ PanelWindow {
                                     anchors.fill: parent
                                     radius: 17
                                     color: root.theme.base
-                                    border.width: 2
+                                    border.width: 1.5
                                     border.color: mainCard.tint
                                     SequentialAnimation on border.color {
                                         running: mainCard.live
@@ -4385,18 +4469,10 @@ PanelWindow {
                             // Status + umur sesi bertumpuk di kanan
                             ColumnLayout {
                                 spacing: 3
-                                Row {
+                                UiText {
                                     Layout.alignment: Qt.AlignRight
-                                    spacing: 5
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 6; height: 6; radius: 3
-                                        color: mainCard.tint
-                                    }
-                                    UiText {
-                                        text: mainCard.sess ? root.stateLabel(mainCard.sess.state) : ""
-                                        color: mainCard.tint; font.pixelSize: 12; font.bold: true
-                                    }
+                                    text: mainCard.sess ? root.stateLabel(mainCard.sess.state) : ""
+                                    color: mainCard.tint; font.pixelSize: 11; font.bold: true
                                 }
                                 UiText {
                                     Layout.alignment: Qt.AlignRight
@@ -4414,7 +4490,7 @@ PanelWindow {
                             UiText {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: "Belum ada sesi aktif"
-                                color: root.theme.textDim; font.pixelSize: 12; font.bold: true
+                                color: root.theme.text; font.pixelSize: 12; font.bold: true
                             }
                             UiText {
                                 anchors.horizontalCenter: parent.horizontalCenter
@@ -4427,8 +4503,8 @@ PanelWindow {
                     // Sesi lain cukup sebaris: logo · project · titik status
                     Row {
                         visible: agentTab.sortedSessions.length > 1
-                        Layout.leftMargin: 6
-                        spacing: 12
+                        Layout.leftMargin: 12
+                        spacing: 14
 
                         Repeater {
                             model: agentTab.sortedSessions.slice(1, 3)
@@ -4440,13 +4516,15 @@ PanelWindow {
                                 SourceLogo { kind: otherSess.modelData.agent; size: 12; anchors.verticalCenter: parent.verticalCenter }
                                 UiText {
                                     anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(implicitWidth, 110)
                                     text: otherSess.modelData.project || "?"
-                                    color: root.theme.textDim; font.pixelSize: 11; font.bold: true
+                                    color: root.theme.textDim; font.pixelSize: 11
+                                    elide: Text.ElideRight
                                 }
                                 UiText {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: root.stateLabel(otherSess.modelData.state)
-                                    color: root.stateColor(otherSess.modelData.state); font.pixelSize: 11
+                                    color: root.stateColor(otherSess.modelData.state); font.pixelSize: 10
                                 }
                             }
                         }
@@ -4461,11 +4539,11 @@ PanelWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 2
-                        Layout.leftMargin: 6
-                        Layout.rightMargin: 6
+                        Layout.leftMargin: 12
+                        Layout.rightMargin: 12
                         UiText {
-                            text: "RIWAYAT"
-                            color: root.theme.subtext1; font.pixelSize: 10; font.bold: true; font.letterSpacing: 1.2
+                            text: "Riwayat"
+                            color: root.theme.subtext1; font.pixelSize: 11; font.bold: true
                         }
                         Item { Layout.fillWidth: true }
                         UiText {
@@ -4488,52 +4566,63 @@ PanelWindow {
                             clip: true
                             model: activity.history || []
                             boundsBehavior: Flickable.StopAtBounds
-                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
-                            UiText {
-                                anchors.centerIn: parent
-                                visible: historyView.count === 0
-                                text: "Belum ada aktivitas tercatat"
-                                color: root.theme.subtext0
-                                font.pixelSize: 12
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                                background: null
+                                contentItem: Rectangle {
+                                    implicitWidth: 3
+                                    radius: 2
+                                    color: root.theme.surface2
+                                    opacity: parent.active ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+                                }
                             }
 
-                            // Baris: jam · logo · project · teks ............ durasi · status
+                            // Baris: ikon status · logo · project · teks ...... label · durasi · jam
                             delegate: Rectangle {
                                 id: histRow
                                 required property var modelData
                                 readonly property color tint: root.activityColor(modelData.kind)
-                                width: historyView.width - 6
-                                height: 26
+                                // Mulai & selesai sudah jelas dari ikon; label hanya untuk kejadian lain.
+                                readonly property bool notable: modelData.kind !== "start" && modelData.kind !== "done"
+                                width: historyView.width
+                                height: 24
                                 radius: 8
                                 color: histHover.hovered ? root.theme.surface0 : "transparent"
                                 HoverHandler { id: histHover }
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.leftMargin: 6
-                                    anchors.rightMargin: 6
-                                    spacing: 8
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 7
                                     UiText {
-                                        text: root.clockText(histRow.modelData.t)
-                                        color: root.theme.subtext0
-                                        font.pixelSize: 11
-                                        font.family: root.monoFont
-                                        Layout.preferredWidth: 36
+                                        text: root.activityGlyph(histRow.modelData.kind)
+                                        color: histRow.tint
+                                        font.pixelSize: 11; font.bold: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.preferredWidth: 12
                                     }
-                                    SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 14 }
+                                    SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 13 }
                                     UiText {
                                         text: histRow.modelData.project || "—"
-                                        color: root.theme.text; font.pixelSize: 11; font.bold: true
+                                        color: root.theme.textDim; font.pixelSize: 11
                                         elide: Text.ElideRight
-                                        Layout.maximumWidth: 90
+                                        Layout.preferredWidth: 78
                                     }
                                     UiText {
                                         text: histRow.modelData.text
                                         color: root.theme.subtext1
                                         font.pixelSize: 11
+                                        font.weight: Font.Normal
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
+                                    }
+                                    UiText {
+                                        visible: histRow.notable
+                                        text: root.activityLabel(histRow.modelData.kind)
+                                        color: histRow.tint
+                                        font.pixelSize: 10
                                     }
                                     UiText {
                                         visible: !!histRow.modelData.dur
@@ -4541,14 +4630,21 @@ PanelWindow {
                                         color: root.theme.subtext0; font.pixelSize: 10
                                     }
                                     UiText {
-                                        text: root.activityLabel(histRow.modelData.kind)
-                                        color: histRow.tint
-                                        font.pixelSize: 11; font.bold: true
+                                        text: root.clockText(histRow.modelData.t)
+                                        color: root.theme.subtext0
+                                        font.pixelSize: 10
                                         horizontalAlignment: Text.AlignRight
-                                        Layout.preferredWidth: 84
                                     }
                                 }
                             }
+                        }
+
+                        UiText {
+                            anchors.centerIn: parent
+                            visible: historyView.count === 0
+                            text: "Belum ada aktivitas tercatat"
+                            color: root.theme.subtext0
+                            font.pixelSize: 11
                         }
 
                         // Fade bawah: baris terakhir larut ke latar island, tidak terpotong kasar.
@@ -4556,16 +4652,17 @@ PanelWindow {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            height: 14
+                            height: 22
+                            visible: historyView.count > 0 && !historyView.atYEnd
                             gradient: Gradient {
-                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.0; color: Qt.rgba(root.theme.base.r, root.theme.base.g, root.theme.base.b, 0) }
                                 GradientStop { position: 1.0; color: root.theme.base }
                             }
                         }
                     }
                 }
 
-                // TAB 2: STATUS (SYSTEM MONITOR)
+// TAB 2: STATUS (SYSTEM MONITOR)
                 ColumnLayout {
                     visible: root.activeTab === "status"
                     Layout.fillWidth: true
@@ -4669,186 +4766,6 @@ PanelWindow {
                     }
 
                     // Spacer bawah agar menempel ke atas
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                    }
-                }
-
-                // TAB 3: 9ROUTER USAGE
-                ColumnLayout {
-                    visible: root.activeTab === "usage"
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.alignment: Qt.AlignTop
-                    spacing: 8
-
-                    // Header: Hari Ini (Today)
-                    UiText {
-                        text: "HARI INI (TODAY)"
-                        color: root.theme.subtext0
-                        font.pixelSize: 11
-                        font.bold: true
-                    }
-
-                    // Metrik Hari Ini
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
-                            Column {
-                                anchors.centerIn: parent; spacing: 1
-                                UiText { text: "Requests"; color: root.theme.subtext1; font.pixelSize: 11 }
-                                UiText { text: "" + root.usageRequests; color: "#fff"; font.pixelSize: 13; font.bold: true }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
-                            Column {
-                                anchors.centerIn: parent; spacing: 1
-                                UiText { text: "Biaya Hari Ini"; color: root.theme.subtext1; font.pixelSize: 11 }
-                                UiText { text: "$" + root.usageCost.toFixed(2); color: root.theme.text; font.pixelSize: 13; font.bold: true }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
-                            Column {
-                                anchors.centerIn: parent; spacing: 1
-                                UiText { text: "Tokens"; color: root.theme.subtext1; font.pixelSize: 11 }
-                                UiText { text: root.formatTokens(root.usageTokens); color: root.theme.accent; font.pixelSize: 13; font.bold: true }
-                            }
-                        }
-                    }
-
-                    // Header: Akumulasi 60 Hari Terakhir
-                    UiText {
-                        text: "TOTAL 60 HARI TERAKHIR (ALL-TIME 60D)"
-                        color: root.theme.subtext0
-                        font.pixelSize: 11
-                        font.bold: true
-                        topPadding: 2
-                    }
-
-                    // Metrik 60 Hari
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
-                            Column {
-                                anchors.centerIn: parent; spacing: 1
-                                UiText { text: "Total Requests"; color: root.theme.subtext1; font.pixelSize: 11 }
-                                UiText { text: "" + root.usage60dRequests; color: root.theme.text; font.pixelSize: 13; font.bold: true }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
-                            Column {
-                                anchors.centerIn: parent; spacing: 1
-                                UiText { text: "Total Biaya (60d)"; color: root.theme.subtext1; font.pixelSize: 11 }
-                                UiText { text: "$" + root.usage60dCost.toFixed(2); color: root.theme.text; font.pixelSize: 13; font.bold: true }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
-                            Column {
-                                anchors.centerIn: parent; spacing: 1
-                                UiText { text: "Total Tokens (60d)"; color: root.theme.subtext1; font.pixelSize: 11 }
-                                UiText { text: root.formatTokens(root.usage60dTokens); color: root.theme.text; font.pixelSize: 13; font.bold: true }
-                            }
-                        }
-                    }
-
-                    // Section: Model AI Aktif & Recent Requests
-                    UiText {
-                        text: "MODEL AI AKTIF HARI INI"
-                        color: root.theme.subtext0
-                        font.pixelSize: 11
-                        font.bold: true
-                        topPadding: 2
-                    }
-
-                    UiText {
-                        visible: root.activeModelsList.length === 0
-                        text: "Belum ada request hari ini"
-                        color: root.theme.subtext0
-                        font.pixelSize: 11
-                    }
-
-                    Column {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Repeater {
-                            model: root.activeModelsList
-                            Rectangle {
-                                width: parent.width
-                                height: 26
-                                radius: 6
-                                color: root.theme.surface0
-                                border.color: "transparent"
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 8
-                                    anchors.rightMargin: 8
-
-                                    Rectangle {
-                                        width: 6; height: 6; radius: 3
-                                        color: modelData.name.indexOf("claude") !== -1 ? root.theme.subtext1 : root.theme.subtext1
-                                    }
-
-                                    UiText {
-                                        text: modelData.name
-                                        color: root.theme.text
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    UiText {
-                                        text: "" + modelData.requests + " reqs"
-                                        color: root.theme.subtext1
-                                        font.pixelSize: 11
-                                    }
-
-                                    UiText {
-                                        text: "$" + modelData.cost.toFixed(2)
-                                        color: root.theme.text
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Status Bar Ringkas
-                    Rectangle {
-                        Layout.fillWidth: true; height: 30; radius: 6; color: root.theme.surface0; border.color: root.theme.surface1
-                        RowLayout {
-                            anchors.fill: parent; anchors.margins: 8
-                            UiText { text: "Gateway 9Router"; color: root.theme.subtext0; font.pixelSize: 11 }
-                            Item { Layout.fillWidth: true }
-                            // Status nyata dari bridge, bukan label "Active" statis.
-                            Rectangle { width: 6; height: 6; radius: 3; color: !root.usageLoaded ? root.theme.subtext0 : (root.usageAvailable ? "#22c55e" : "#ef4444") }
-                            UiText {
-                                text: !root.usageLoaded ? "Memuat…" : (root.usageAvailable ? "Database terbaca" : "Data tidak tersedia")
-                                color: !root.usageLoaded ? root.theme.subtext0 : root.theme.subtext0
-                                font.pixelSize: 11; font.bold: true
-                            }
-                        }
-                    }
-
-                    // Spacer agar konten tetap nempel di atas
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -5031,271 +4948,6 @@ PanelWindow {
                     }
 
                     Item { Layout.fillWidth: true; Layout.fillHeight: true }
-                }
-
-                // TAB 5: GIT & WEB PROJECTS PORTAL
-                ColumnLayout {
-                    visible: root.activeTab === "projects"
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    spacing: 6
-
-                    // Header Bar
-                    RowLayout {
-                        Layout.fillWidth: true
-
-                        RowLayout {
-                            spacing: 6
-                            UiText {
-                                text: "PROJECTS & DEPLOYMENT LINKS"
-                                color: root.theme.text
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        Rectangle {
-                            width: 60; height: 22; radius: 5
-                            color: refreshHover.containsMouse ? root.theme.surface1 : root.theme.surface0
-                            border.color: root.theme.surface2; border.width: 1
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: 4
-                                UiText { text: "Refresh"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
-                            }
-                            MouseArea {
-                                id: refreshHover
-                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: fetchProjectsProcess.running = true
-                            }
-                        }
-                    }
-
-                    // List Container
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: 8
-                        color: root.theme.mantle
-                        border.color: "transparent"
-                        border.width: 1
-
-                        ListView {
-                            id: projectsListView
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 6
-                            clip: true
-                            model: root.gitProjectsList
-
-                            UiText {
-                                anchors.centerIn: parent
-                                visible: root.gitProjectsList.length === 0
-                                text: "Memuat project… (atau tidak ada di ~/Projects/project-web)"
-                                color: root.theme.subtext0
-                                font.pixelSize: 12
-                            }
-
-                            delegate: Rectangle {
-                                width: projectsListView.width
-                                implicitHeight: projCol.implicitHeight + 14
-                                radius: 8
-                                color: modelData.is_active ? root.theme.surface0 : root.theme.mantle
-                                border.color: modelData.is_active ? root.theme.surface2 : root.theme.surface1
-                                border.width: modelData.is_active ? 1 : 1
-
-                                ColumnLayout {
-                                    id: projCol
-                                    anchors.fill: parent
-                                    anchors.margins: 7
-                                    spacing: 5
-
-                                    // Baris 1: Status & Nama Project
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 6
-
-                                        UiText {
-                                            text: modelData.name || modelData.id
-                                            color: "#ffffff"
-                                            font.pixelSize: 12
-                                            font.bold: true
-                                        }
-
-                                        // Active Badge
-                                        Rectangle {
-                                            visible: Boolean(modelData.is_active)
-                                            implicitWidth: actLbl.implicitWidth + 8
-                                            height: 14
-                                            radius: 3
-                                            color: root.theme.surface2
-                                            UiText {
-                                                id: actLbl
-                                                anchors.centerIn: parent
-                                                text: "ACTIVE"
-                                                color: root.theme.textDim
-                                                font.pixelSize: 10
-                                                font.bold: true
-                                            }
-                                        }
-
-                                        // Branch Pill
-                                        Rectangle {
-                                            implicitWidth: bLbl.implicitWidth + 8
-                                            height: 14
-                                            radius: 3
-                                            color: root.theme.surface1
-                                            border.color: root.theme.surface2
-                                            border.width: 1
-                                            UiText {
-                                                id: bLbl
-                                                anchors.centerIn: parent
-                                                text: modelData.branch || "master"
-                                                color: root.theme.textDim
-                                                font.pixelSize: 10
-                                                font.bold: true
-                                                font.family: root.monoFont
-                                            }
-                                        }
-
-                                        Item { Layout.fillWidth: true }
-
-                                        // Commits Today Badge
-                                        Rectangle {
-                                            implicitWidth: cTodayLbl.implicitWidth + 8
-                                            height: 14
-                                            radius: 3
-                                            color: modelData.commits_today > 0 ? root.theme.surface1 : root.theme.surface1
-                                            border.color: modelData.commits_today > 0 ? root.theme.surface2 : root.theme.surface2
-                                            border.width: 1
-                                            UiText {
-                                                id: cTodayLbl
-                                                anchors.centerIn: parent
-                                                text: modelData.commits_today > 0 ? (modelData.commits_today + " commit hari ini") : "0 commit"
-                                                color: modelData.commits_today > 0 ? root.theme.textDim : root.theme.subtext0
-                                                font.pixelSize: 10
-                                                font.bold: true
-                                            }
-                                        }
-
-                                        // Clean / Dirty Status
-                                        UiText {
-                                            text: modelData.modified > 0 ? ("+" + modelData.modified + " modif") : "✓ clean"
-                                            color: modelData.modified > 0 ? root.theme.textDim : root.theme.subtext0
-                                            font.pixelSize: 10
-                                            font.bold: true
-                                            font.family: root.monoFont
-                                        }
-                                    }
-
-                                    // Baris 2: Last Commit Message
-                                    UiText {
-                                        Layout.fillWidth: true
-                                        text: modelData.last_commit || "-"
-                                        color: root.theme.subtext1
-                                        font.pixelSize: 11
-                                        font.family: root.monoFont
-                                        elide: Text.ElideRight
-                                    }
-
-                                    // Baris 3: Action Buttons (Staging / Production / VS Code)
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 6
-
-                                        // Tombol Staging
-                                        Rectangle {
-                                            visible: Boolean(modelData.staging && modelData.staging.length > 0)
-                                            implicitWidth: stgRow.implicitWidth + 12
-                                            height: 20
-                                            radius: 4
-                                            color: stgHover.containsMouse ? root.theme.surface2 : root.theme.surface1
-                                            border.color: root.theme.surface2
-                                            border.width: 1
-
-                                            RowLayout {
-                                                id: stgRow
-                                                anchors.centerIn: parent
-                                                spacing: 4
-                                                UiText {
-                                                    text: "Staging"
-                                                    color: root.theme.textDim
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                }
-                                            }
-                                            MouseArea {
-                                                id: stgHover
-                                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                                preventStealing: true
-                                                onClicked: root.openWebUrl(modelData.staging)
-                                            }
-                                        }
-
-                                        // Tombol Production
-                                        Rectangle {
-                                            visible: Boolean(modelData.production && modelData.production.length > 0)
-                                            implicitWidth: prodRow.implicitWidth + 12
-                                            height: 20
-                                            radius: 4
-                                            color: prodHover.containsMouse ? root.theme.surface2 : root.theme.surface1
-                                            border.color: root.theme.surface2
-                                            border.width: 1
-
-                                            RowLayout {
-                                                id: prodRow
-                                                anchors.centerIn: parent
-                                                spacing: 4
-                                                UiText {
-                                                    text: "Production"
-                                                    color: root.theme.textDim
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                }
-                                            }
-                                            MouseArea {
-                                                id: prodHover
-                                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                                preventStealing: true
-                                                onClicked: root.openWebUrl(modelData.production)
-                                            }
-                                        }
-
-                                        Item { Layout.fillWidth: true }
-
-                                        // Tombol Open Code
-                                        Rectangle {
-                                            implicitWidth: codeRow.implicitWidth + 10
-                                            height: 20
-                                            radius: 4
-                                            color: codeHover.containsMouse ? root.theme.surface1 : root.theme.surface0
-                                            border.color: root.theme.surface2
-                                            border.width: 1
-
-                                            RowLayout {
-                                                id: codeRow
-                                                anchors.centerIn: parent
-                                                spacing: 4
-                                                UiText {
-                                                    text: "VS Code"
-                                                    color: root.theme.textDim
-                                                    font.pixelSize: 11
-                                                }
-                                            }
-                                            MouseArea {
-                                                id: codeHover
-                                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                                preventStealing: true
-                                                onClicked: root.openProjectInCode(modelData.path)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
 
                 // TAB 6: DEV SERVER (php artisan serve + npm run dev per project)
@@ -5499,401 +5151,6 @@ PanelWindow {
                                             onClicked: {
                                                 root.devStopProject(modelData.id);
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // TAB 7: INTERVIEW ASSIST (transkrip lawan bicara + saran jawaban)
-                ColumnLayout {
-                    id: ivTab
-                    visible: root.activeTab === "interview"
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.bottomMargin: 4
-                    spacing: 8
-
-                    readonly property color stateTint: root.interviewState === "listening" ? (root.interviewSpeaking ? "#ef4444" : "#22c55e")
-                                                     : root.interviewState === "loading" ? "#f59e0b"
-                                                     : root.interviewState === "error" ? "#ef4444" : root.theme.overlay
-                    // Layar sambutan selama belum ada sesi, transkrip, atau jawaban.
-                    readonly property bool intro: !root.interviewRunning && root.interviewTranscript.length === 0
-                                                  && root.interviewAnswers.length === 0
-                    readonly property string profilePath: (root.interviewProfile || "~/.config/hermes-coucou/interview_profile.md")
-                                                          .replace(/^\/home\/[^\/]+/, "~")
-
-                    // Bar kontrol: status · sumber · auto · jawab · mulai/stop
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        Rectangle {
-                            width: 8; height: 8; radius: 4
-                            color: ivTab.stateTint
-                            SequentialAnimation on opacity {
-                                running: root.interviewRunning
-                                loops: Animation.Infinite
-                                onRunningChanged: if (!running) parent.opacity = 1
-                                NumberAnimation { to: 0.3; duration: 650; easing.type: Easing.InOutSine }
-                                NumberAnimation { to: 1.0; duration: 650; easing.type: Easing.InOutSine }
-                            }
-                        }
-                        UiText {
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            color: root.interviewState === "error" ? "#fca5a5" : root.theme.text
-                            font.pixelSize: 11; font.bold: true
-                            text: root.interviewState === "listening"
-                                  ? (root.interviewThinking ? "Menyusun jawaban…" : root.interviewSpeaking ? "Pewawancara berbicara…" : "Mendengarkan")
-                                  : root.interviewState === "loading" ? "Menyiapkan…"
-                                  : root.interviewState === "error" ? (root.interviewMessage || "Gagal memulai")
-                                  : "Siap"
-                            ToolTip.visible: ivStatusHover.hovered && !!root.interviewMessage
-                            ToolTip.text: root.interviewMessage
-                            HoverHandler { id: ivStatusHover }
-                        }
-
-                        // Meter level audio: bukti suara benar-benar tertangkap
-                        Row {
-                            visible: root.interviewRunning
-                            spacing: 2
-                            Repeater {
-                                model: 5
-                                Rectangle {
-                                    required property int index
-                                    anchors.bottom: parent.bottom
-                                    width: 3; radius: 1.5
-                                    height: 4 + 10 * Math.max(0, Math.min(1, root.interviewLevel * 1.6 - index * 0.2))
-                                    color: root.interviewSpeaking ? "#ef4444" : "#22c55e"
-                                    Behavior on height { NumberAnimation { duration: 100 } }
-                                }
-                            }
-                        }
-
-                        // Sumber audio (terkunci selama sesi berjalan)
-                        Rectangle {
-                            implicitWidth: ivSrcRow.implicitWidth + 4
-                            implicitHeight: 24
-                            radius: 12
-                            color: root.theme.surface0
-                            border.color: root.theme.surface1
-                            opacity: root.interviewRunning ? 0.6 : 1
-                            Row {
-                                id: ivSrcRow
-                                anchors.centerIn: parent
-                                spacing: 2
-                                Repeater {
-                                    model: [{ key: "system", label: "Online" }, { key: "mic", label: "Tatap muka" }]
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        readonly property bool chosen: root.interviewSource === modelData.key
-                                        width: ivSrcTxt.implicitWidth + 16; height: 20; radius: 10
-                                        color: chosen ? root.theme.surface2 : "transparent"
-                                        UiText {
-                                            id: ivSrcTxt
-                                            anchors.centerIn: parent
-                                            text: parent.modelData.label
-                                            color: parent.chosen ? "#ffffff" : root.theme.subtext0
-                                            font.pixelSize: 11; font.bold: true
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            enabled: !root.interviewRunning
-                                            onClicked: root.interviewSource = parent.modelData.key
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Auto: saran jawaban otomatis setiap pertanyaan selesai
-                        Row {
-                            spacing: 5
-                            UiText { anchors.verticalCenter: parent.verticalCenter; text: "Auto"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 26; height: 14; radius: 7
-                                color: root.interviewAuto ? Qt.darker(root.theme.accent, 1.4) : root.theme.surface1
-                                border.color: root.interviewAuto ? root.theme.accent : root.theme.surface2
-                                Rectangle {
-                                    width: 10; height: 10; radius: 5
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    x: root.interviewAuto ? parent.width - width - 2 : 2
-                                    color: root.interviewAuto ? "#ffffff" : root.theme.subtext0
-                                    Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                }
-                            }
-                            ToolTip.visible: ivAutoHover.hovered
-                            ToolTip.delay: 400
-                            ToolTip.text: "Buat saran jawaban otomatis setiap pertanyaan selesai"
-                            HoverHandler { id: ivAutoHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler {
-                                onTapped: {
-                                    root.interviewAuto = !root.interviewAuto;
-                                    if (root.interviewRunning)
-                                        sendBridgeCommand({ action: "interview_auto", enabled: root.interviewAuto });
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            visible: root.interviewRunning
-                            readonly property bool usable: root.interviewTranscript.length > 0 && !root.interviewThinking
-                            implicitWidth: 52; implicitHeight: 24; radius: 12
-                            color: usable && jawabHover.containsMouse ? root.theme.surface2 : root.theme.surface1
-                            opacity: usable ? 1 : 0.45
-                            UiText { anchors.centerIn: parent; text: "Jawab"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                            MouseArea {
-                                id: jawabHover
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: parent.usable
-                                onClicked: { root.interviewThinking = true; sendBridgeCommand({ action: "interview_answer" }); }
-                            }
-                        }
-
-                        Rectangle {
-                            implicitWidth: ivStartTxt.implicitWidth + 22
-                            implicitHeight: 24
-                            radius: 12
-                            color: root.interviewRunning ? (ivStartHover.containsMouse ? "#991b1b" : "#7f1d1d")
-                                                         : (ivStartHover.containsMouse ? "#fbbf24" : "#f59e0b")
-                            UiText {
-                                id: ivStartTxt
-                                anchors.centerIn: parent
-                                text: root.interviewRunning ? "■  Stop" : "●  Mulai"
-                                color: root.interviewRunning ? "#fecaca" : "#1c1917"
-                                font.pixelSize: 11; font.bold: true
-                            }
-                            MouseArea {
-                                id: ivStartHover
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.interviewToggle()
-                            }
-                        }
-                    }
-
-                    // Sambutan: cara pakai dalam tiga langkah
-                    ColumnLayout {
-                        visible: ivTab.intro
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 8
-
-                        Column {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            UiText { text: "Interview Assist"; color: "#ffffff"; font.pixelSize: 15; font.bold: true }
-                            UiText {
-                                width: parent.width
-                                wrapMode: Text.Wrap
-                                text: "QBot mendengarkan pertanyaan pewawancara, lalu menyarankan jawaban sesuai profilmu."
-                                color: root.theme.subtext1; font.pixelSize: 11
-                            }
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            spacing: 6
-                            Repeater {
-                                model: [
-                                    {n: "1", title: "Pilih sumber", body: "Online untuk Zoom / Meet / Discord, Tatap muka memakai mic."},
-                                    {n: "2", title: "Pakai headset", body: "Supaya suaramu sendiri tidak ikut terekam dan ditranskrip."},
-                                    {n: "3", title: "Isi profil / CV", body: ivTab.profilePath}
-                                ]
-                                Rectangle {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    Layout.preferredWidth: 1
-                                    Layout.fillHeight: true
-                                    radius: 10
-                                    color: root.theme.surface0
-                                    border.color: root.theme.surface1
-                                    ColumnLayout {
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 4
-                                        Rectangle {
-                                            width: 20; height: 20; radius: 10
-                                            color: Qt.rgba(0.96, 0.62, 0.04, 0.18)
-                                            UiText { anchors.centerIn: parent; text: modelData.n; color: "#fbbf24"; font.pixelSize: 11; font.bold: true }
-                                        }
-                                        UiText { text: modelData.title; color: root.theme.text; font.pixelSize: 11; font.bold: true }
-                                        UiText {
-                                            Layout.fillWidth: true
-                                            text: modelData.body
-                                            color: root.theme.subtext1
-                                            font.pixelSize: 11
-                                            font.family: modelData.n === "3" ? root.monoFont : root.uiFont
-                                            // Path boleh dipotong di mana saja; kalimat biasa per kata.
-                                            wrapMode: modelData.n === "3" ? Text.WrapAnywhere : Text.Wrap
-                                        }
-                                        Item { Layout.fillHeight: true }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Sesi: kartu saran jawaban (kiri, utama) + transkrip (kanan)
-                    RowLayout {
-                        visible: !ivTab.intro
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 6
-
-                        // Kartu saran jawaban (terbaru; ‹ › untuk riwayat)
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            radius: 10
-                            color: root.theme.surface0
-                            border.color: root.interviewThinking ? "#f59e0b" : root.theme.surface1
-                            Behavior on border.color { ColorAnimation { duration: 200 } }
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 6
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Rectangle {
-                                        implicitWidth: ivAnsLbl.implicitWidth + 12
-                                        implicitHeight: 16
-                                        radius: 8
-                                        color: Qt.rgba(0.96, 0.62, 0.04, 0.16)
-                                        UiText { id: ivAnsLbl; anchors.centerIn: parent; text: "Saran jawaban"; color: "#fbbf24"; font.pixelSize: 10; font.bold: true }
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                    UiText {
-                                        visible: root.interviewAnswers.length > 1
-                                        text: "‹"
-                                        color: root.interviewAnswerIndex < root.interviewAnswers.length - 1 ? root.theme.textDim : root.theme.surface2
-                                        font.pixelSize: 14; font.bold: true
-                                        MouseArea { anchors.fill: parent; anchors.margins: -5; cursorShape: Qt.PointingHandCursor
-                                            onClicked: if (root.interviewAnswerIndex < root.interviewAnswers.length - 1) root.interviewAnswerIndex += 1 }
-                                    }
-                                    UiText {
-                                        visible: root.interviewAnswers.length > 1
-                                        text: (root.interviewAnswerIndex + 1) + " / " + root.interviewAnswers.length
-                                        color: root.theme.subtext1; font.pixelSize: 11
-                                    }
-                                    UiText {
-                                        visible: root.interviewAnswers.length > 1
-                                        text: "›"
-                                        color: root.interviewAnswerIndex > 0 ? root.theme.textDim : root.theme.surface2
-                                        font.pixelSize: 14; font.bold: true
-                                        MouseArea { anchors.fill: parent; anchors.margins: -5; cursorShape: Qt.PointingHandCursor
-                                            onClicked: if (root.interviewAnswerIndex > 0) root.interviewAnswerIndex -= 1 }
-                                    }
-                                }
-
-                                // Pertanyaan yang dijawab
-                                UiText {
-                                    visible: !!root.interviewShownAnswer && !!root.interviewShownAnswer.question
-                                    Layout.fillWidth: true
-                                    text: root.interviewShownAnswer ? "“" + root.interviewShownAnswer.question + "”" : ""
-                                    color: root.theme.subtext1
-                                    font.pixelSize: 11; font.italic: true
-                                    wrapMode: Text.Wrap
-                                    maximumLineCount: 2
-                                    elide: Text.ElideRight
-                                }
-
-                                Flickable {
-                                    id: ivAnswerFlick
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    clip: true
-                                    contentHeight: ivAnswerText.paintedHeight
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
-                                    TextEdit {
-                                        renderType: Text.NativeRendering
-                                        font.hintingPreference: Font.PreferFullHinting
-                                        font.family: root.uiFont
-                                        id: ivAnswerText
-                                        width: ivAnswerFlick.width - 8
-                                        readOnly: true
-                                        selectByMouse: true
-                                        wrapMode: TextEdit.Wrap
-                                        color: root.interviewShownAnswer && root.interviewShownAnswer.error ? "#fca5a5"
-                                             : root.interviewShownAnswer ? root.theme.text : root.theme.subtext0
-                                        selectionColor: root.theme.surface2
-                                        font.pixelSize: root.interviewShownAnswer ? 14 : 12
-                                        text: {
-                                            let a = root.interviewShownAnswer;
-                                            if (a) return a.error || a.text || "…";
-                                            if (root.interviewThinking) return "Menyusun jawaban…";
-                                            return "Menunggu pertanyaan dari pewawancara…";
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Transkrip lawan bicara (scroll otomatis ke bawah)
-                        Rectangle {
-                            Layout.preferredWidth: 150
-                            Layout.fillHeight: true
-                            radius: 10
-                            color: root.theme.mantle
-                            border.color: root.theme.surface0
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 4
-                                UiText { text: "Transkrip"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
-
-                                ListView {
-                                    id: ivTranscriptView
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    spacing: 6
-                                    clip: true
-                                    model: root.interviewTranscript
-                                    onCountChanged: positionViewAtEnd()
-
-                                    UiText {
-                                        anchors.centerIn: parent
-                                        width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.Wrap
-                                        visible: root.interviewTranscript.length === 0
-                                        text: "Ucapan pewawancara muncul di sini"
-                                        color: root.theme.subtext0
-                                        font.pixelSize: 11
-                                    }
-
-                                    delegate: Column {
-                                        required property var modelData
-                                        width: ivTranscriptView.width
-                                        spacing: 1
-                                        UiText {
-                                            text: modelData.time.slice(0, 5)
-                                            color: root.theme.subtext0
-                                            font.pixelSize: 10
-                                            font.family: root.monoFont
-                                        }
-                                        UiText {
-                                            width: parent.width
-                                            wrapMode: Text.Wrap
-                                            color: root.theme.textDim
-                                            font.pixelSize: 11
-                                            textFormat: Text.PlainText
-                                            text: modelData.text
                                         }
                                     }
                                 }

@@ -7,7 +7,7 @@
 **Dynamic Island + maskot Mochi untuk Arch Linux (Niri / Wayland), terhubung ke Hermes Agent.**
 
 Setujui izin agent, pantau sesi Claude Code / OpenCode / Hermes, jawab pertanyaan
-agent, simpan catatan, dan bantu interview — langsung dari island di atas layar.
+agent, dan simpan catatan — langsung dari island di atas layar.
 
 ![Linux](https://img.shields.io/badge/Linux-Wayland-FCC624?logo=linux&logoColor=black)
 ![Quickshell](https://img.shields.io/badge/Quickshell-QML-41CD52?logo=qt)
@@ -25,15 +25,17 @@ backend integrasi **Hermes Agent**.
 - **Approval Hermes** — tombol Reject / Run untuk request asli dari Hermes.
 - **Status agent coding** — sesi Claude Code dan OpenCode: bekerja, butuh izin, selesai.
 - **Jawab izin & pertanyaan** agent langsung dari island.
-- **Interview Assist** — transkrip lokal (faster-whisper) + saran jawaban dari LLM.
+- **Catatan cepat** — `qs ... ipc call qbot note` (mis. `Mod+N`) membuka kolom teks di capsule; Enter simpan, Esc tutup.
+- **Alert dev server** — notifikasi saat `serve` atau `npm run dev` mati sendiri.
+- **HUD sistem** — volume, brightness, charger, baterai lemah (20/10/5%), dan perangkat Bluetooth tampil sebentar di capsule.
 - **Perintah suara** — "halo qbot, buka chromium dan buka youtube": dikenali lokal, dijalankan, dan dibalas dengan suara.
 - **Now Playing + lirik** — saat Spotify diputar island jadi mini player (cover berputar, baris lirik aktif, visualizer); tab **Musik** berisi cover, kontrol, dan lirik tersinkron dari [LRCLIB](https://lrclib.net) (hanya judul, artis, durasi yang dikirim).
 - **Efek suara** — bunyi saat izin masuk, task selesai, atau gagal (Sistem → Tools untuk mematikan).
 - **Sapaan harian** — sekali per hari Mochi menyapa sesuai jam dengan ringkasan hari aktif terakhir.
 - **Mochi punya suasana** — berkeringat saat CPU ≥ 90%, berjoget saat musik diputar, mengantuk pukul 23.00–05.00.
 - **5 tema** — Zinc, Catppuccin, Tokyo Night, Gruvbox, Nord (tombol ◐ di panel kiri).
-- **Panel 4 grup** — Agent (Hermes + sesi coding), Kerja (Projects, Dev Server),
-  Sistem (CPU/RAM, 9Router, Tools), Catatan; plus mode Interview.
+- **Panel 4 grup** — Agent (Hermes + sesi coding), Kerja (Dev Server),
+  Sistem (CPU/RAM, Tools), Catatan.
 
 ## Arsitektur
 
@@ -97,7 +99,7 @@ qs -p $QBOT ipc call qbot toggle        # buka/tutup island
 qs -p $QBOT ipc call qbot open          # buka (juga memberi fokus ke kartu izin)
 qs -p $QBOT ipc call qbot close
 qs -p $QBOT ipc call qbot tab status    # buka langsung ke tab tertentu
-# tab: agent, projects, dev, status, usage, tools, notes, interview
+# tab: agent, dev, status, tools, notes, music
 qs -p $QBOT ipc call qbot theme nord     # zinc, catppuccin, tokyonight, gruvbox, nord
 qs -p $QBOT ipc call qbot sound false    # matikan efek suara
 qs -p $QBOT ipc call qbot mood dance     # coba ekspresi (sleepy, sweat, dance, …); "" = otomatis
@@ -115,7 +117,6 @@ Island yang dibuka lewat hotkey langsung menerima keyboard; `Esc` menutupnya.
 | Tombol | Di panel | Di kartu izin | Di kartu pertanyaan |
 |---|---|---|---|
 | `1`–`4` | grup Agent / Kerja / Sistem / Catatan | – | pilih opsi (`1`–`9`) |
-| `5` | Interview | – | – |
 | `←` `→` / `Tab` | sub-tab sebelumnya/berikutnya | – | – |
 | `Y` | – | Izinkan (sengaja bukan `Enter`) | – |
 | `Enter` | – | – | Lanjut/Kirim |
@@ -231,40 +232,6 @@ QBot mati, Claude bertanya di terminal seperti biasa. OpenCode dan Hermes
 tetap menampilkan prompt di TUI-nya sendiri; jawaban mana pun yang lebih dulu
 dipakai dan kartu di island ikut tertutup.
 
-## Interview Assist
-
-Tab **Interview** merekam suara lawan bicara, menampilkan transkrip, lalu
-menyarankan jawaban begitu lawan bicara selesai bertanya.
-
-```
-parec (PipeWire) -> deteksi jeda suara -> faster-whisper (lokal, CPU)
-                 -> LLM OpenAI-compatible (default: model Hermes di 9router) -> island
-```
-
-- **Sistem**: rekam audio yang keluar dari speaker/headset (Zoom, Meet,
-  Discord). Pakai **headset** supaya yang terekam hanya lawan bicara.
-- **Mic**: interview tatap muka (mikrofon laptop menangkap semua orang).
-- **Auto**: jawaban dibuat otomatis ~0,8 dtk setelah lawan bicara diam;
-  basa-basi ("oke", "baik") dilewati. **Jawab** memaksa jawaban untuk
-  ucapan terakhir. **‹ ›** melihat jawaban sebelumnya.
-- Isi profil/CV + deskripsi pekerjaan di
-  `~/.config/hermes-coucou/interview_profile.md` (template dibuat saat
-  pertama Mulai). Tanpa profil, jawaban berisi `[isi: ...]` alih-alih mengarang.
-- Transkrip + jawaban tersimpan di `~/.local/share/hermes-coucou/interviews/`.
-
-Konfigurasi (env pada proses Quickshell/`run.sh`):
-
-| Env | Default | Keterangan |
-|---|---|---|
-| `HERMES_COUCOU_INTERVIEW_WHISPER` | `small` | `base` lebih cepat, `medium` lebih akurat |
-| `HERMES_COUCOU_INTERVIEW_LANG` | otomatis | mis. `en` / `id` agar deteksi bahasa tidak meleset |
-| `HERMES_COUCOU_INTERVIEW_MODEL` | `ag/gemini-3.8-flash-low`, cadangan `model.default` Hermes | daftar dipisah koma, dicoba berurutan bila gagal |
-| `HERMES_COUCOU_INTERVIEW_BASE_URL` / `_API_KEY` | dari `~/.hermes/config.yaml` (+ `.env`) | endpoint lain |
-
-Butuh `faster-whisper`, `numpy`, `pyyaml` di python bridge (venv Hermes
-sudah punya) dan `parec` (pipewire-pulse). Rekam percakapan hanya dengan
-persetujuan pihak lain dan sesuai aturan yang berlaku.
-
 ## Perintah Suara
 
 Panggil **"halo qbot"** lalu ucapkan perintah, atau langsung sekaligus:
@@ -297,6 +264,7 @@ menjalankan perintah shell.
 | `HERMES_COUCOU_VOICE_WHISPER` | `small` | `base` lebih ringan, kurang akurat |
 | `HERMES_COUCOU_VOICE_LANG` | `id` | bahasa ucapan |
 | `HERMES_COUCOU_PIPER` / `HERMES_COUCOU_PIPER_VOICE` | venv & suara di atas | piper/suara lain |
+| `HERMES_COUCOU_INTERVIEW_MODEL` / `_BASE_URL` / `_API_KEY` | dari `~/.hermes/config.yaml` (+ `.env`) | LLM untuk jawaban suara (nama lama, dipakai bersama `interview.py`) |
 
 ## Mengirim Event Demo ke QBot
 
