@@ -7,6 +7,7 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
 import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 
 PanelWindow {
     id: root
@@ -268,17 +269,17 @@ PanelWindow {
     // butuh izin) sengaja sama di semua tema supaya maknanya tetap terbaca.
     readonly property var themePresets: ({
         noir:       {label: "Noir", base: "#000000", mantle: "#080808", surface0: "#101010", surface1: "#1a1a1a", surface2: "#262626",
-                     overlay: "#404040", subtext0: "#6e6e6e", subtext1: "#a3a3a3", textDim: "#d4d4d4", text: "#fafafa", accent: "#ffffff"},
+                     overlay: "#404040", subtext0: "#848484", subtext1: "#a3a3a3", textDim: "#d4d4d4", text: "#fafafa", accent: "#ffffff"},
         zinc:       {label: "Zinc", base: "#0a0a0c", mantle: "#121215", surface0: "#18181b", surface1: "#27272a", surface2: "#3f3f46",
-                     overlay: "#52525b", subtext0: "#71717a", subtext1: "#a1a1aa", textDim: "#d4d4d8", text: "#f4f4f5", accent: "#38bdf8"},
+                     overlay: "#52525b", subtext0: "#8f8f96", subtext1: "#a4a4ad", textDim: "#d4d4d8", text: "#f4f4f5", accent: "#38bdf8"},
         catppuccin: {label: "Catppuccin", base: "#11111b", mantle: "#181825", surface0: "#1e1e2e", surface1: "#313244", surface2: "#45475a",
-                     overlay: "#585b70", subtext0: "#7f849c", subtext1: "#a6adc8", textDim: "#bac2de", text: "#cdd6f4", accent: "#cba6f7"},
+                     overlay: "#585b70", subtext0: "#969cb6", subtext1: "#abb3ce", textDim: "#bac2de", text: "#cdd6f4", accent: "#cba6f7"},
         tokyonight: {label: "Tokyo Night", base: "#16161e", mantle: "#1a1b26", surface0: "#1f2335", surface1: "#292e42", surface2: "#3b4261",
-                     overlay: "#545c7e", subtext0: "#737aa2", subtext1: "#9aa5ce", textDim: "#a9b1d6", text: "#c0caf5", accent: "#7aa2f7"},
+                     overlay: "#545c7e", subtext0: "#8e96bf", subtext1: "#a2acd6", textDim: "#a9b1d6", text: "#c0caf5", accent: "#7aa2f7"},
         gruvbox:    {label: "Gruvbox", base: "#1d2021", mantle: "#282828", surface0: "#32302f", surface1: "#3c3836", surface2: "#504945",
-                     overlay: "#665c54", subtext0: "#928374", subtext1: "#a89984", textDim: "#d5c4a1", text: "#ebdbb2", accent: "#fabd2f"},
+                     overlay: "#665c54", subtext0: "#b1a28a", subtext1: "#c9b99b", textDim: "#d5c4a1", text: "#ebdbb2", accent: "#fabd2f"},
         nord:       {label: "Nord", base: "#242933", mantle: "#2e3440", surface0: "#3b4252", surface1: "#434c5e", surface2: "#4c566a",
-                     overlay: "#616e88", subtext0: "#7b88a1", subtext1: "#a3b1c9", textDim: "#d8dee9", text: "#eceff4", accent: "#88c0d0"}
+                     overlay: "#616e88", subtext0: "#b6becc", subtext1: "#d1d8e4", textDim: "#d8dee9", text: "#eceff4", accent: "#88c0d0"}
     })
     readonly property var themeNames: ["noir", "zinc", "catppuccin", "tokyonight", "gruvbox", "nord"]
     readonly property var theme: themePresets[settings.theme] || themePresets.noir
@@ -286,6 +287,47 @@ PanelWindow {
     function cycleTheme() {
         let i = themeNames.indexOf(settings.theme);
         settings.theme = themeNames[(i + 1) % themeNames.length];
+    }
+
+    // HUD volume: membaca sink default PipeWire, jadi ikut bereaksi pada perubahan
+    // dari mana saja (tombol keyboard lewat inir, wpctl, tab Tools, aplikasi lain).
+    readonly property PwNode audioSink: Pipewire.defaultAudioSink
+    readonly property bool audioReady: !!audioSink && audioSink.ready && !!audioSink.audio
+    property int volumeSinkId: -1
+    property real volumeLevel: 0
+    property bool volumeMuted: false
+    property bool volumeHud: false
+    readonly property bool volumeHudOn: volumeHud && !islandExpanded && !isNotifying
+    readonly property string volumeLabel: volumeMuted ? "Mute" : Math.round(volumeLevel * 100) + "%"
+
+    // Sink baru (awal jalan, ganti perangkat) hanya dicatat; HUD muncul saat nilainya berubah.
+    function syncVolume() {
+        if (!audioReady) return;
+        let vol = audioSink.audio.volume;
+        let muted = audioSink.audio.muted;
+        let changed = volumeSinkId === audioSink.id
+                      && (Math.abs(vol - volumeLevel) > 0.001 || muted !== volumeMuted);
+        volumeSinkId = audioSink.id;
+        volumeLevel = vol;
+        volumeMuted = muted;
+        if (changed) {
+            volumeHud = true;
+            volumeHudTimer.restart();
+        }
+    }
+    onAudioReadyChanged: syncVolume()
+    onAudioSinkChanged: syncVolume()
+
+    PwObjectTracker { objects: root.audioSink ? [root.audioSink] : [] }
+    Connections {
+        target: root.audioReady ? root.audioSink.audio : null
+        function onVolumeChanged() { root.syncVolume(); }
+        function onMutedChanged() { root.syncVolume(); }
+    }
+    Timer {
+        id: volumeHudTimer
+        interval: 1500
+        onTriggered: root.volumeHud = false
     }
 
     Timer {
@@ -1953,7 +1995,7 @@ PanelWindow {
     property string focusedAppId: ""
     property bool focusedFullscreen: false
     readonly property bool browserFocused: /chrom|firefox|brave|zen|vivaldi|edge|librewolf|floorp|thorium|opera/i.test(focusedAppId)
-    readonly property bool islandMini: browserFocused && !focusedFullscreen && !islandExpanded && !isNotifying
+    readonly property bool islandMini: browserFocused && !focusedFullscreen && !islandExpanded && !isNotifying && !volumeHud
     readonly property bool islandHidden: focusedFullscreen && !islandExpanded
                                          && notifyType !== "approval" && notifyType !== "request"
 
@@ -2033,6 +2075,7 @@ PanelWindow {
         width: {
             if (root.islandExpanded && !root.isNotifying) return 660;
             if (root.isNotifying) return (root.notifyType === "approval" || root.notifyType === "request") ? 600 : 500;
+            if (root.volumeHudOn) return 240;
             if (root.islandMini) return 120;
             if (root.showMiniPlayer) return Math.min(440, standbyRow.implicitWidth + 32);
             return 240;
@@ -2183,7 +2226,7 @@ PanelWindow {
             // 1. TAMPILAN STANDBY BIASA
             Row {
                 id: standbyRow
-                visible: !root.isNotifying && !root.islandExpanded && !root.islandMini
+                visible: !root.isNotifying && !root.islandExpanded && !root.islandMini && !root.volumeHudOn
                 anchors.centerIn: parent
                 spacing: 12
 
@@ -2239,7 +2282,7 @@ PanelWindow {
                             text: root.mediaTitle
                             color: "#ffffff"
                             elide: Text.ElideRight
-                            font.pixelSize: 11; font.bold: true
+                            font.pixelSize: 12; font.bold: true
                             font.family: "Inter, sans-serif"
                         }
                         Text {
@@ -2248,7 +2291,7 @@ PanelWindow {
                             text: root.currentLyric || root.mediaArtist
                             color: root.currentLyric ? root.mediaAccent : root.theme.subtext1
                             elide: Text.ElideRight
-                            font.pixelSize: 10
+                            font.pixelSize: 11
                             font.family: "Inter, sans-serif"
                         }
                     }
@@ -2303,6 +2346,45 @@ PanelWindow {
                             NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
                         }
                     }
+                }
+            }
+
+            // HUD VOLUME: muncul sebentar di capsule saat volume atau mute berubah.
+            RowLayout {
+                visible: root.volumeHudOn
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 10
+
+                Image {
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    sourceSize: Qt.size(18, 18)
+                    source: "file:///usr/share/icons/Papirus/24x24/panel/audio-volume-"
+                            + (root.volumeMuted ? "muted" : root.volumeLevel < 0.34 ? "low" : root.volumeLevel < 0.67 ? "medium" : "high") + ".svg"
+                }
+                Rectangle {
+                    id: volumeTrack
+                    Layout.fillWidth: true
+                    implicitHeight: 6
+                    radius: 3
+                    color: root.theme.surface2
+                    Rectangle {
+                        height: parent.height
+                        radius: 3
+                        width: parent.width * Math.min(1, root.volumeLevel)
+                        color: root.volumeMuted ? root.theme.subtext0 : root.theme.accent
+                        Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                }
+                Text {
+                    Layout.preferredWidth: 38
+                    horizontalAlignment: Text.AlignRight
+                    text: root.volumeLabel
+                    color: root.volumeMuted ? root.theme.subtext1 : root.theme.text
+                    font.pixelSize: 12
+                    font.bold: true
                 }
             }
 
@@ -2393,7 +2475,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: root.agentName(root.notifySource).toUpperCase()
                                 color: root.sourceColor(root.notifySource)
-                                font.pixelSize: 8
+                                font.pixelSize: 10
                                 font.bold: true
                                 font.letterSpacing: 0.6
                             }
@@ -2419,7 +2501,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: "▸ " + root.notifyProject
                                 color: root.theme.subtext1
-                                font.pixelSize: 8
+                                font.pixelSize: 10
                                 font.bold: true
                                 font.family: "JetBrains Mono, monospace"
                             }
@@ -2432,7 +2514,7 @@ PanelWindow {
                         Layout.fillWidth: true
                         text: root.activeDetail
                         color: root.theme.textDim
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         // Command approval / kalimat inti jawaban interview: sampai 2 baris.
                         readonly property bool twoLines: root.notifyType === "approval" || root.notifyType === "interview" || root.notifyType === "voice"
                         elide: Text.ElideRight
@@ -2504,7 +2586,7 @@ PanelWindow {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "⏱ " + root.notifyDuration
                             color: root.theme.subtext0
-                            font.pixelSize: 8
+                            font.pixelSize: 10
                             font.bold: true
                         }
                     }
@@ -2519,7 +2601,7 @@ PanelWindow {
                             anchors.centerIn: parent
                             text: ">_"
                             color: "#fdba74"
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             font.bold: true
                             font.family: "JetBrains Mono, monospace"
                         }
@@ -2545,12 +2627,12 @@ PanelWindow {
                         RowLayout {
                             anchors.centerIn: parent
                             spacing: 4
-                            Text { text: "✕"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
+                            Text { text: "✕"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
                             Text {
                                 id: rejectText
                                 text: root.decisionPending ? "Sending…" : "Reject"
                                 color: root.theme.subtext1
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 font.bold: true
                             }
                         }
@@ -2575,12 +2657,12 @@ PanelWindow {
                         RowLayout {
                             anchors.centerIn: parent
                             spacing: 5
-                            Text { text: "⚡"; font.pixelSize: 11 }
+                            Text { text: "⚡"; font.pixelSize: 12 }
                             Text {
                                 id: runText
                                 text: root.decisionPending ? "Sending…" : "Run"
                                 color: "#000000"
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 font.bold: true
                             }
                         }
@@ -2650,7 +2732,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: root.agentName(root.notifySource).toUpperCase()
                                     color: root.sourceColor(root.notifySource)
-                                    font.pixelSize: 8; font.bold: true; font.letterSpacing: 0.6
+                                    font.pixelSize: 10; font.bold: true; font.letterSpacing: 0.6
                                 }
                             }
                             Rectangle {
@@ -2662,7 +2744,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: "▸ " + root.notifyProject
                                     color: root.theme.subtext1
-                                    font.pixelSize: 8; font.bold: true; font.family: "JetBrains Mono, monospace"
+                                    font.pixelSize: 10; font.bold: true; font.family: "JetBrains Mono, monospace"
                                 }
                             }
                             Rectangle {
@@ -2674,7 +2756,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: requestCard.question ? requestCard.question.header : ""
                                     color: root.theme.textDim
-                                    font.pixelSize: 8; font.bold: true
+                                    font.pixelSize: 10; font.bold: true
                                 }
                             }
                         }
@@ -2699,7 +2781,7 @@ PanelWindow {
                             id: queueTxt
                             anchors.centerIn: parent
                             text: "1/" + root.agentRequests.length + " antrean"
-                            color: root.theme.textDim; font.pixelSize: 9; font.bold: true
+                            color: root.theme.textDim; font.pixelSize: 10; font.bold: true
                         }
                     }
                 }
@@ -2718,7 +2800,7 @@ PanelWindow {
                         anchors.margins: 8
                         text: requestCard.req ? (requestCard.req.detail || "-") : ""
                         color: root.theme.textDim
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         font.family: "JetBrains Mono, monospace"
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         maximumLineCount: 5
@@ -2786,7 +2868,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: optionRow.chosen ? "✓" : (optionRow.index + 1)
                                             color: optionRow.chosen ? root.theme.surface1 : root.theme.subtext1
-                                            font.pixelSize: 9; font.bold: true
+                                            font.pixelSize: 10; font.bold: true
                                         }
                                     }
 
@@ -2797,7 +2879,7 @@ PanelWindow {
                                             width: parent.width
                                             text: optionRow.modelData.label
                                             color: root.theme.text
-                                            font.pixelSize: 11; font.bold: true
+                                            font.pixelSize: 12; font.bold: true
                                             elide: Text.ElideRight
                                         }
                                         Text {
@@ -2805,7 +2887,7 @@ PanelWindow {
                                             width: parent.width
                                             text: optionRow.modelData.description || ""
                                             color: root.theme.subtext1
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             wrapMode: Text.WordWrap
                                             maximumLineCount: 2
                                             elide: Text.ElideRight
@@ -2843,7 +2925,7 @@ PanelWindow {
                         placeholderText: "Jawaban lain… (Enter untuk kirim)"
                         placeholderTextColor: root.theme.subtext0
                         color: "#ffffff"
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         background: null
                         enabled: !root.reqSending
                         onAccepted: root.reqAdvance()
@@ -2855,7 +2937,7 @@ PanelWindow {
                     Layout.fillWidth: true
                     text: "⚠ " + root.reqError
                     color: "#f87171"
-                    font.pixelSize: 10
+                    font.pixelSize: 11
                     wrapMode: Text.WordWrap
                 }
 
@@ -2867,7 +2949,7 @@ PanelWindow {
                     Text {
                         text: "Jawab di terminal"
                         color: termLink.containsMouse ? root.theme.textDim : root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.underline: termLink.containsMouse
                         MouseArea {
                             id: termLink
@@ -2884,15 +2966,15 @@ PanelWindow {
                         text: requestCard.isPerm
                               ? "⌨ Y izinkan · N tolak" + (requestCard.req && requestCard.req.can_always ? " · A selalu" : "") + " · T terminal"
                               : "⌨ 1-9 pilih · Enter lanjut · T terminal"
-                        color: root.theme.overlay
-                        font.pixelSize: 9
+                        color: root.theme.subtext0
+                        font.pixelSize: 10
                     }
 
                     Text {
                         visible: root.reqSending
                         text: "Mengirim…"
                         color: root.theme.accent
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                     }
 
                     Item { Layout.fillWidth: true }
@@ -2918,7 +3000,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: permBtn.modelData.label
                                 color: permBtn.modelData.fg
-                                font.pixelSize: 11; font.bold: true
+                                font.pixelSize: 12; font.bold: true
                             }
                             MouseArea {
                                 id: permBtnHover
@@ -2937,7 +3019,7 @@ PanelWindow {
                         implicitWidth: backTxt.implicitWidth + 20; implicitHeight: 28; radius: 7
                         color: backHover.containsMouse ? root.theme.surface1 : root.theme.surface0
                         border.color: root.theme.surface2
-                        Text { id: backTxt; anchors.centerIn: parent; text: "Kembali"; color: root.theme.textDim; font.pixelSize: 11; font.bold: true }
+                        Text { id: backTxt; anchors.centerIn: parent; text: "Kembali"; color: root.theme.textDim; font.pixelSize: 12; font.bold: true }
                         MouseArea {
                             id: backHover
                             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -2960,7 +3042,7 @@ PanelWindow {
                             anchors.centerIn: parent
                             text: nextBtn.last ? "Kirim" : "Lanjut"
                             color: nextBtn.ready ? "#000000" : root.theme.overlay
-                            font.pixelSize: 11; font.bold: true
+                            font.pixelSize: 12; font.bold: true
                         }
                         MouseArea {
                             id: nextHover
@@ -3061,7 +3143,7 @@ PanelWindow {
                                 Text {
                                     text: root.currentStatus
                                     color: root.theme.subtext1
-                                    font.pixelSize: 10
+                                    font.pixelSize: 11
                                     font.bold: true
                                     font.family: "Inter, sans-serif"
                                     anchors.verticalCenter: parent.verticalCenter
@@ -3141,7 +3223,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: "◐"
                                     color: root.theme.accent
-                                    font.pixelSize: 10
+                                    font.pixelSize: 11
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -3208,7 +3290,7 @@ PanelWindow {
                                 required property var modelData
                                 required property int index
                                 readonly property bool active: root.groupOf(root.activeTab) === modelData.key
-                                implicitWidth: groupTxt.implicitWidth + 14
+                                implicitWidth: groupTxt.implicitWidth + 10
                                 implicitHeight: 26
                                 radius: 6
                                 color: active ? root.theme.surface1 : (groupHover.containsMouse ? root.theme.surface0 : "transparent")
@@ -3217,7 +3299,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: groupBtn.modelData.label
                                     color: groupBtn.active ? "#fff" : root.theme.subtext0
-                                    font.pixelSize: 11; font.bold: true
+                                    font.pixelSize: 12; font.bold: true
                                 }
                                 MouseArea {
                                     id: groupHover
@@ -3240,7 +3322,7 @@ PanelWindow {
                                 id: subBtn
                                 required property var modelData
                                 readonly property bool active: root.activeTab === modelData.key
-                                implicitWidth: subTxt.implicitWidth + 14
+                                implicitWidth: subTxt.implicitWidth + 10
                                 implicitHeight: 20
                                 radius: 10
                                 color: active ? Qt.darker(root.theme.accent, 2.8) : "transparent"
@@ -3250,7 +3332,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: subBtn.modelData.label
                                     color: subBtn.active ? root.theme.text : root.theme.subtext1
-                                    font.pixelSize: 9; font.bold: true
+                                    font.pixelSize: 10; font.bold: true
                                 }
                                 MouseArea {
                                     anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -3266,7 +3348,7 @@ PanelWindow {
                             id: musicNavBtn
                             visible: root.mediaActive || root.activeTab === "music"
                             readonly property bool active: root.activeTab === "music"
-                            implicitWidth: musicNavRow.implicitWidth + 14
+                            implicitWidth: musicNavRow.implicitWidth + 10
                             implicitHeight: 26
                             radius: 6
                             color: active ? root.theme.surface1 : (musicNavHover.containsMouse ? root.theme.surface0 : "transparent")
@@ -3289,7 +3371,7 @@ PanelWindow {
                                 Text {
                                     text: root.subTabs.length > 1 ? "♪" : "Musik"
                                     color: musicNavBtn.active ? "#fff" : root.theme.subtext0
-                                    font.pixelSize: root.subTabs.length > 1 ? 12 : 10; font.bold: true
+                                    font.pixelSize: root.subTabs.length > 1 ? 12 : 11; font.bold: true
                                 }
                             }
                             MouseArea {
@@ -3303,7 +3385,7 @@ PanelWindow {
                         Rectangle {
                             id: ivNavBtn
                             readonly property bool active: root.activeTab === "interview"
-                            implicitWidth: ivNavRow.implicitWidth + 14
+                            implicitWidth: ivNavRow.implicitWidth + 10
                             implicitHeight: 26
                             radius: 6
                             color: active ? root.theme.surface1 : (ivNavHover.containsMouse ? root.theme.surface0 : "transparent")
@@ -3318,7 +3400,7 @@ PanelWindow {
                                     width: 6; height: 6; radius: 3
                                     color: "#ef4444"
                                 }
-                                Text { text: "Interview"; color: ivNavBtn.active ? "#fff" : root.theme.subtext0; font.pixelSize: 10; font.bold: true }
+                                Text { text: "Interview"; color: ivNavBtn.active ? "#fff" : root.theme.subtext0; font.pixelSize: 11; font.bold: true }
                             }
                             MouseArea {
                                 id: ivNavHover
@@ -3380,7 +3462,7 @@ PanelWindow {
                         spacing: 6
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: "♪"; color: root.theme.subtext0; font.pixelSize: 28 }
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Tidak ada musik diputar"; color: root.theme.subtext1; font.pixelSize: 12; font.bold: true }
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Putar lagu di Spotify, liriknya muncul di sini"; color: root.theme.subtext0; font.pixelSize: 10 }
+                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Putar lagu di Spotify, liriknya muncul di sini"; color: root.theme.subtext0; font.pixelSize: 11 }
                     }
 
                     RowLayout {
@@ -3421,7 +3503,7 @@ PanelWindow {
                                 text: root.mediaArtist
                                 color: root.theme.subtext1
                                 elide: Text.ElideRight
-                                font.pixelSize: 10
+                                font.pixelSize: 11
                             }
 
                             // Progress: klik untuk lompat (bila pemutar mendukung seek).
@@ -3449,9 +3531,9 @@ PanelWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Layout.topMargin: -4
-                                Text { text: root.formatTime(root.mediaPosition); color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: root.formatTime(root.mediaPosition); color: root.theme.subtext1; font.pixelSize: 11 }
                                 Item { Layout.fillWidth: true }
-                                Text { text: root.mediaLength > 0 ? root.formatTime(root.mediaLength) : ""; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: root.mediaLength > 0 ? root.formatTime(root.mediaLength) : ""; color: root.theme.subtext1; font.pixelSize: 11 }
                             }
 
                             Row {
@@ -3537,7 +3619,7 @@ PanelWindow {
                                     scale: current || !root.lyricSynced ? 1.0 : 0.86
                                     color: current ? "#ffffff"
                                          : !root.lyricSynced ? root.theme.textDim
-                                         : Qt.rgba(1, 1, 1, index < root.lyricIndex ? 0.3 : 0.45)
+                                         : Qt.rgba(1, 1, 1, index < root.lyricIndex ? 0.55 : 0.72)
                                     style: current ? Text.Outline : Text.Normal
                                     styleColor: Qt.rgba(root.mediaAccent.r, root.mediaAccent.g, root.mediaAccent.b, 0.35)
                                     Behavior on scale { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
@@ -3667,7 +3749,7 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     text: parent.modelData.label
                                     color: parent.active ? "#ffffff" : root.theme.subtext0
-                                    font.pixelSize: 10; font.bold: true
+                                    font.pixelSize: 11; font.bold: true
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -3684,7 +3766,7 @@ PanelWindow {
                             visible: notesModel.count > 0
                             text: notesTabCol.confirmClear ? "Yakin hapus semua?" : "Hapus semua"
                             color: notesTabCol.confirmClear ? "#fca5a5" : (clearAllHover.containsMouse ? root.theme.textDim : root.theme.subtext0)
-                            font.pixelSize: 10; font.bold: true
+                            font.pixelSize: 11; font.bold: true
                             Layout.rightMargin: 4
                             MouseArea {
                                 id: clearAllHover
@@ -3721,7 +3803,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: "+  Catatan baru"
                                 color: "#ffffff"
-                                font.pixelSize: 10; font.bold: true
+                                font.pixelSize: 11; font.bold: true
                             }
                             MouseArea {
                                 id: newNoteHover
@@ -3752,12 +3834,12 @@ PanelWindow {
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: notesTabCol.filterTag === "cmd" ? "Belum ada command" : (notesTabCol.filterTag === "task" ? "Belum ada task" : (notesTabCol.filterTag === "note" ? "Belum ada memo" : "Belum ada catatan"))
-                                color: root.theme.subtext1; font.pixelSize: 11; font.bold: true
+                                color: root.theme.subtext1; font.pixelSize: 12; font.bold: true
                             }
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: "Klik “+ Catatan baru” untuk mulai menulis"
-                                color: root.theme.subtext0; font.pixelSize: 10
+                                color: root.theme.subtext0; font.pixelSize: 11
                             }
                         }
 
@@ -3803,7 +3885,7 @@ PanelWindow {
                                         visible: text !== ""
                                         text: noteCard.heading
                                         color: "#ffffff"
-                                        font.pixelSize: 11; font.bold: true
+                                        font.pixelSize: 12; font.bold: true
                                         font.strikeout: !!noteCard.note.done
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
@@ -3811,7 +3893,7 @@ PanelWindow {
                                     Text {
                                         text: noteCard.preview
                                         color: noteCard.type === "cmd" ? root.theme.textDim : root.theme.subtext1
-                                        font.pixelSize: noteCard.type === "cmd" ? 10 : 11
+                                        font.pixelSize: noteCard.type === "cmd" ? 11 : 12
                                         font.family: noteCard.type === "cmd" ? "JetBrains Mono, monospace" : "Inter, sans-serif"
                                         wrapMode: noteCard.type === "cmd" ? Text.WrapAnywhere : Text.Wrap
                                         maximumLineCount: noteCard.heading ? 2 : 3
@@ -3835,12 +3917,12 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: noteCard.type === "cmd" ? "Command" : (noteCard.type === "task" ? "Task" : "Memo")
                                                 color: noteCard.note.color ? noteCard.accent : root.theme.textDim
-                                                font.pixelSize: 9; font.bold: true
+                                                font.pixelSize: 10; font.bold: true
                                             }
                                         }
                                         Text {
                                             text: noteCard.note.time || ""
-                                            color: root.theme.subtext0; font.pixelSize: 9
+                                            color: root.theme.subtext0; font.pixelSize: 10
                                         }
                                         Item { Layout.fillWidth: true }
 
@@ -3854,7 +3936,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 visible: !!noteCard.note.done
                                                 text: "✓"; color: "#000000"
-                                                font.pixelSize: 10; font.bold: true
+                                                font.pixelSize: 11; font.bold: true
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -3939,7 +4021,7 @@ PanelWindow {
                                         id: backRow
                                         anchors.centerIn: parent
                                         text: "‹  Kembali"
-                                        color: "#ffffff"; font.pixelSize: 10; font.bold: true
+                                        color: "#ffffff"; font.pixelSize: 11; font.bold: true
                                     }
                                     MouseArea {
                                         id: backHoverN
@@ -3969,7 +4051,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: parent.modelData.label
                                             color: parent.active ? "#ffffff" : root.theme.subtext0
-                                            font.pixelSize: 10; font.bold: true
+                                            font.pixelSize: 11; font.bold: true
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -4020,7 +4102,7 @@ PanelWindow {
                                                 : edAction.modelData === "copy" ? (edAction.copied ? "✓ Tersalin" : "Salin")
                                                 : (noteEditor.confirmDelete ? "Yakin hapus?" : "Hapus")
                                             color: edAction.danger ? (noteEditor.confirmDelete ? "#fecaca" : "#f87171") : "#ffffff"
-                                            font.pixelSize: 10; font.bold: true
+                                            font.pixelSize: 11; font.bold: true
                                         }
                                         Timer { id: copiedTimer; interval: 1500; onTriggered: edAction.copied = false }
                                         MouseArea {
@@ -4097,12 +4179,12 @@ PanelWindow {
                                 Layout.fillWidth: true
                                 Text {
                                     text: noteEditor.note ? "Dibuat " + (noteEditor.note.time || "-") : ""
-                                    color: root.theme.subtext0; font.pixelSize: 9
+                                    color: root.theme.subtext0; font.pixelSize: 10
                                 }
                                 Item { Layout.fillWidth: true }
                                 Text {
                                     text: noteSaveTimer.running ? "Menyimpan…" : "Tersimpan otomatis · Esc untuk kembali"
-                                    color: root.theme.subtext0; font.pixelSize: 9
+                                    color: root.theme.subtext0; font.pixelSize: 10
                                 }
                             }
                         }
@@ -4182,7 +4264,7 @@ PanelWindow {
                                         text: agentChip.state === "offline" ? "Offline"
                                               : root.stateLabel(agentChip.state) + (agentChip.count > 1 ? " · " + agentChip.count : "")
                                         color: agentChip.tint
-                                        font.pixelSize: 10; font.bold: true
+                                        font.pixelSize: 11; font.bold: true
                                     }
                                 }
 
@@ -4212,7 +4294,7 @@ PanelWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "Auto-izin"
                                 color: settings.autoSafe ? root.theme.text : root.theme.subtext1
-                                font.pixelSize: 10; font.bold: true
+                                font.pixelSize: 11; font.bold: true
                             }
                             ToolTip.visible: autoSafeHover.hovered
                             ToolTip.delay: 400
@@ -4284,7 +4366,7 @@ PanelWindow {
                                 Text {
                                     visible: text !== ""
                                     text: mainCard.sess ? (mainCard.sess.detail || mainCard.sess.prompt || "") : ""
-                                    color: root.theme.subtext1; font.pixelSize: 10
+                                    color: root.theme.subtext1; font.pixelSize: 11
                                     font.family: "JetBrains Mono, monospace"
                                     elide: Text.ElideMiddle; Layout.fillWidth: true
                                 }
@@ -4303,14 +4385,14 @@ PanelWindow {
                                     }
                                     Text {
                                         text: mainCard.sess ? root.stateLabel(mainCard.sess.state) : ""
-                                        color: mainCard.tint; font.pixelSize: 11; font.bold: true
+                                        color: mainCard.tint; font.pixelSize: 12; font.bold: true
                                     }
                                 }
                                 Text {
                                     Layout.alignment: Qt.AlignRight
                                     // currentTimeSecs: dependensi agar "x dtk" ikut berdetak
                                     text: mainCard.sess && root.currentTimeSecs !== "" ? root.agoText(mainCard.sess.updated) : ""
-                                    color: root.theme.subtext0; font.pixelSize: 9
+                                    color: root.theme.subtext0; font.pixelSize: 10
                                 }
                             }
                         }
@@ -4327,7 +4409,7 @@ PanelWindow {
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: "Jalankan Claude Code atau OpenCode, statusnya muncul di sini"
-                                color: root.theme.subtext0; font.pixelSize: 10
+                                color: root.theme.subtext0; font.pixelSize: 11
                             }
                         }
                     }
@@ -4349,19 +4431,19 @@ PanelWindow {
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: otherSess.modelData.project || "?"
-                                    color: root.theme.textDim; font.pixelSize: 10; font.bold: true
+                                    color: root.theme.textDim; font.pixelSize: 11; font.bold: true
                                 }
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: root.stateLabel(otherSess.modelData.state)
-                                    color: root.stateColor(otherSess.modelData.state); font.pixelSize: 10
+                                    color: root.stateColor(otherSess.modelData.state); font.pixelSize: 11
                                 }
                             }
                         }
                         Text {
                             visible: agentTab.sortedSessions.length > 3
                             text: "+" + (agentTab.sortedSessions.length - 3) + " lainnya"
-                            color: root.theme.subtext0; font.pixelSize: 10
+                            color: root.theme.subtext0; font.pixelSize: 11
                         }
                     }
 
@@ -4373,14 +4455,14 @@ PanelWindow {
                         Layout.rightMargin: 6
                         Text {
                             text: "RIWAYAT"
-                            color: root.theme.subtext1; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1.2
+                            color: root.theme.subtext1; font.pixelSize: 10; font.bold: true; font.letterSpacing: 1.2
                         }
                         Item { Layout.fillWidth: true }
                         Text {
                             readonly property var today: (activity.daily || {})[root.dayKey(new Date())]
                             visible: !!today
                             text: today ? "Hari ini  " + today.done + " selesai · " + today.perms + " izin" + (today.errors ? " · " + today.errors + " gagal" : "") : ""
-                            color: root.theme.subtext0; font.pixelSize: 9
+                            color: root.theme.subtext0; font.pixelSize: 10
                         }
                     }
 
@@ -4403,7 +4485,7 @@ PanelWindow {
                                 visible: historyView.count === 0
                                 text: "Belum ada aktivitas tercatat"
                                 color: root.theme.subtext0
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                             }
 
                             // Baris: jam · logo · project · teks ............ durasi · status
@@ -4425,33 +4507,33 @@ PanelWindow {
                                     Text {
                                         text: root.clockText(histRow.modelData.t)
                                         color: root.theme.subtext0
-                                        font.pixelSize: 10
+                                        font.pixelSize: 11
                                         font.family: "JetBrains Mono, monospace"
                                         Layout.preferredWidth: 36
                                     }
                                     SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 14 }
                                     Text {
                                         text: histRow.modelData.project || "—"
-                                        color: root.theme.text; font.pixelSize: 10; font.bold: true
+                                        color: root.theme.text; font.pixelSize: 11; font.bold: true
                                         elide: Text.ElideRight
                                         Layout.maximumWidth: 90
                                     }
                                     Text {
                                         text: histRow.modelData.text
                                         color: root.theme.subtext1
-                                        font.pixelSize: 10
+                                        font.pixelSize: 11
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
                                     Text {
                                         visible: !!histRow.modelData.dur
                                         text: histRow.modelData.dur || ""
-                                        color: root.theme.subtext0; font.pixelSize: 9
+                                        color: root.theme.subtext0; font.pixelSize: 10
                                     }
                                     Text {
                                         text: root.activityLabel(histRow.modelData.kind)
                                         color: histRow.tint
-                                        font.pixelSize: 10; font.bold: true
+                                        font.pixelSize: 11; font.bold: true
                                         horizontalAlignment: Text.AlignRight
                                         Layout.preferredWidth: 84
                                     }
@@ -4485,7 +4567,7 @@ PanelWindow {
                     Text {
                         text: "RESOURCE SISTEM (ARCH LINUX)"
                         color: root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.bold: true
                         topPadding: 2
                     }
@@ -4497,13 +4579,13 @@ PanelWindow {
 
                         // CPU Usage Card
                         Rectangle {
-                            Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
+                            Layout.fillWidth: true; height: 58; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 4
                                 RowLayout {
-                                    Text { text: "CPU"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                    Text { text: "CPU"; color: root.theme.subtext1; font.pixelSize: 11 }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: root.sysCpu + "%"; color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"; font.pixelSize: 10; font.bold: true }
+                                    Text { text: root.sysCpu + "%"; color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"; font.pixelSize: 11; font.bold: true }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 4; radius: 2; color: root.theme.surface1
@@ -4513,19 +4595,19 @@ PanelWindow {
                                         color: root.sysCpu > 85 ? "#ef4444" : "#a78bfa"
                                     }
                                 }
-                                Text { text: root.sysProcesses + " proses"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: root.sysProcesses + " proses"; color: root.theme.subtext1; font.pixelSize: 11 }
                             }
                         }
 
                         // RAM Usage Card
                         Rectangle {
-                            Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
+                            Layout.fillWidth: true; height: 58; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 4
                                 RowLayout {
-                                    Text { text: "RAM Terpakai"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                    Text { text: "RAM Terpakai"; color: root.theme.subtext1; font.pixelSize: 11 }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: "" + root.sysRamPercent + "%"; color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent; font.pixelSize: 10; font.bold: true }
+                                    Text { text: "" + root.sysRamPercent + "%"; color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent; font.pixelSize: 11; font.bold: true }
                                 }
                                 // Progress bar mini RAM
                                 Rectangle {
@@ -4536,18 +4618,18 @@ PanelWindow {
                                         color: root.sysRamPercent > 85 ? "#ef4444" : root.theme.accent
                                     }
                                 }
-                                Text { text: root.sysRamUsed + " / " + root.sysRamTotal; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: root.sysRamUsed + " / " + root.sysRamTotal; color: root.theme.subtext1; font.pixelSize: 11 }
                             }
                         }
 
                         // Uptime Card
                         Rectangle {
-                            Layout.fillWidth: true; height: 50; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
+                            Layout.fillWidth: true; height: 58; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 2
-                                Text { text: "System Uptime"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "System Uptime"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: root.sysUptime; color: root.theme.text; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                Text { text: root.sysKernel; color: root.theme.subtext1; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: root.sysKernel; color: root.theme.subtext1; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                             }
                         }
                     }
@@ -4560,9 +4642,9 @@ PanelWindow {
                         ColumnLayout {
                             anchors.fill: parent; anchors.margins: 8; spacing: 4
                             RowLayout {
-                                Text { text: "Penyimpanan (/)"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Penyimpanan (/)"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Item { Layout.fillWidth: true }
-                                Text { text: "Sisa " + root.sysDiskFree; color: diskCard.diskColor; font.pixelSize: 10; font.bold: true }
+                                Text { text: "Sisa " + root.sysDiskFree; color: diskCard.diskColor; font.pixelSize: 11; font.bold: true }
                             }
                             Rectangle {
                                 Layout.fillWidth: true; height: 4; radius: 2; color: root.theme.surface1
@@ -4572,7 +4654,7 @@ PanelWindow {
                                     color: diskCard.diskColor
                                 }
                             }
-                            Text { text: root.sysDiskUsed + " / " + root.sysDiskTotal + " terpakai (" + root.sysDiskPercent + "%)"; color: root.theme.subtext1; font.pixelSize: 10 }
+                            Text { text: root.sysDiskUsed + " / " + root.sysDiskTotal + " terpakai (" + root.sysDiskPercent + "%)"; color: root.theme.subtext1; font.pixelSize: 11 }
                         }
                     }
 
@@ -4595,7 +4677,7 @@ PanelWindow {
                     Text {
                         text: "HARI INI (TODAY)"
                         color: root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.bold: true
                     }
 
@@ -4608,7 +4690,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Requests"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Requests"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: "" + root.usageRequests; color: "#fff"; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4617,7 +4699,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Biaya Hari Ini"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Biaya Hari Ini"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: "$" + root.usageCost.toFixed(2); color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4626,7 +4708,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Tokens"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Tokens"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: root.formatTokens(root.usageTokens); color: root.theme.accent; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4636,7 +4718,7 @@ PanelWindow {
                     Text {
                         text: "TOTAL 60 HARI TERAKHIR (ALL-TIME 60D)"
                         color: root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.bold: true
                         topPadding: 2
                     }
@@ -4650,7 +4732,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Requests"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Total Requests"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: "" + root.usage60dRequests; color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4659,7 +4741,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Biaya (60d)"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Total Biaya (60d)"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: "$" + root.usage60dCost.toFixed(2); color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4668,7 +4750,7 @@ PanelWindow {
                             Layout.fillWidth: true; height: 46; radius: 8; color: root.theme.surface0; border.color: root.theme.surface1
                             Column {
                                 anchors.centerIn: parent; spacing: 1
-                                Text { text: "Total Tokens (60d)"; color: root.theme.subtext1; font.pixelSize: 10 }
+                                Text { text: "Total Tokens (60d)"; color: root.theme.subtext1; font.pixelSize: 11 }
                                 Text { text: root.formatTokens(root.usage60dTokens); color: root.theme.text; font.pixelSize: 13; font.bold: true }
                             }
                         }
@@ -4678,7 +4760,7 @@ PanelWindow {
                     Text {
                         text: "MODEL AI AKTIF HARI INI"
                         color: root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.bold: true
                         topPadding: 2
                     }
@@ -4687,7 +4769,7 @@ PanelWindow {
                         visible: root.activeModelsList.length === 0
                         text: "Belum ada request hari ini"
                         color: root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                     }
 
                     Column {
@@ -4716,7 +4798,7 @@ PanelWindow {
                                     Text {
                                         text: modelData.name
                                         color: root.theme.text
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.bold: true
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
@@ -4725,13 +4807,13 @@ PanelWindow {
                                     Text {
                                         text: "" + modelData.requests + " reqs"
                                         color: root.theme.subtext1
-                                        font.pixelSize: 10
+                                        font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "$" + modelData.cost.toFixed(2)
                                         color: root.theme.text
-                                        font.pixelSize: 10
+                                        font.pixelSize: 11
                                         font.bold: true
                                     }
                                 }
@@ -4744,14 +4826,14 @@ PanelWindow {
                         Layout.fillWidth: true; height: 30; radius: 6; color: root.theme.surface0; border.color: root.theme.surface1
                         RowLayout {
                             anchors.fill: parent; anchors.margins: 8
-                            Text { text: "Gateway 9Router"; color: root.theme.subtext0; font.pixelSize: 10 }
+                            Text { text: "Gateway 9Router"; color: root.theme.subtext0; font.pixelSize: 11 }
                             Item { Layout.fillWidth: true }
                             // Status nyata dari bridge, bukan label "Active" statis.
                             Rectangle { width: 6; height: 6; radius: 3; color: !root.usageLoaded ? root.theme.subtext0 : (root.usageAvailable ? "#22c55e" : "#ef4444") }
                             Text {
                                 text: !root.usageLoaded ? "Memuat…" : (root.usageAvailable ? "Database terbaca" : "Data tidak tersedia")
                                 color: !root.usageLoaded ? root.theme.subtext0 : root.theme.subtext0
-                                font.pixelSize: 10; font.bold: true
+                                font.pixelSize: 11; font.bold: true
                             }
                         }
                     }
@@ -4771,7 +4853,7 @@ PanelWindow {
                     Layout.alignment: Qt.AlignTop
                     spacing: 8
 
-                    Text { text: "Buka cepat"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
+                    Text { text: "Buka cepat"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
 
                     GridLayout {
                         columns: 4
@@ -4816,12 +4898,12 @@ PanelWindow {
                                     Text {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         text: toolTile.modelData.label
-                                        color: root.theme.text; font.pixelSize: 10; font.bold: true
+                                        color: root.theme.text; font.pixelSize: 11; font.bold: true
                                     }
                                     Text {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         text: toolTile.modelData.sub
-                                        color: root.theme.subtext1; font.pixelSize: 9
+                                        color: root.theme.subtext1; font.pixelSize: 10
                                     }
                                 }
 
@@ -4834,7 +4916,7 @@ PanelWindow {
                         }
                     }
 
-                    Text { text: "Suara"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true; topPadding: 2 }
+                    Text { text: "Suara"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true; topPadding: 2 }
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -4856,8 +4938,8 @@ PanelWindow {
                                 Column {
                                     Layout.fillWidth: true
                                     spacing: 0
-                                    Text { text: "Volume"; color: root.theme.text; font.pixelSize: 10; font.bold: true }
-                                    Text { text: "PipeWire"; color: root.theme.subtext1; font.pixelSize: 9 }
+                                    Text { text: "Volume"; color: root.theme.text; font.pixelSize: 11; font.bold: true }
+                                    Text { text: root.audioReady ? root.volumeLabel : "PipeWire"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 }
                                 Rectangle {
                                     implicitWidth: volSeg.implicitWidth
@@ -4885,7 +4967,7 @@ PanelWindow {
                                                     anchors.centerIn: parent
                                                     text: parent.modelData.label
                                                     color: parent.index === 1 ? root.theme.textDim : "#ffffff"
-                                                    font.pixelSize: 10; font.bold: true
+                                                    font.pixelSize: 11; font.bold: true
                                                 }
                                                 MouseArea {
                                                     id: segHover
@@ -4911,8 +4993,8 @@ PanelWindow {
                                 Column {
                                     Layout.fillWidth: true
                                     spacing: 0
-                                    Text { text: "Notifikasi"; color: root.theme.text; font.pixelSize: 10; font.bold: true }
-                                    Text { text: settings.sound ? "Bunyi menyala" : "Senyap"; color: root.theme.subtext1; font.pixelSize: 9 }
+                                    Text { text: "Notifikasi"; color: root.theme.text; font.pixelSize: 11; font.bold: true }
+                                    Text { text: settings.sound ? "Bunyi menyala" : "Senyap"; color: root.theme.subtext1; font.pixelSize: 10 }
                                 }
                                 Rectangle {
                                     width: 30; height: 16; radius: 8
@@ -4957,7 +5039,7 @@ PanelWindow {
                             Text {
                                 text: "PROJECTS & DEPLOYMENT LINKS"
                                 color: root.theme.text
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 font.bold: true
                             }
                         }
@@ -4971,7 +5053,7 @@ PanelWindow {
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 4
-                                Text { text: "Refresh"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
+                                Text { text: "Refresh"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
                             }
                             MouseArea {
                                 id: refreshHover
@@ -5003,7 +5085,7 @@ PanelWindow {
                                 visible: root.gitProjectsList.length === 0
                                 text: "Memuat project… (atau tidak ada di ~/Projects/project-web)"
                                 color: root.theme.subtext0
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                             }
 
                             delegate: Rectangle {
@@ -5028,7 +5110,7 @@ PanelWindow {
                                         Text {
                                             text: modelData.name || modelData.id
                                             color: "#ffffff"
-                                            font.pixelSize: 11
+                                            font.pixelSize: 12
                                             font.bold: true
                                         }
 
@@ -5044,7 +5126,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: "ACTIVE"
                                                 color: root.theme.textDim
-                                                font.pixelSize: 9
+                                                font.pixelSize: 10
                                                 font.bold: true
                                             }
                                         }
@@ -5062,7 +5144,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: modelData.branch || "master"
                                                 color: root.theme.textDim
-                                                font.pixelSize: 9
+                                                font.pixelSize: 10
                                                 font.bold: true
                                                 font.family: "JetBrains Mono, monospace"
                                             }
@@ -5083,7 +5165,7 @@ PanelWindow {
                                                 anchors.centerIn: parent
                                                 text: modelData.commits_today > 0 ? (modelData.commits_today + " commit hari ini") : "0 commit"
                                                 color: modelData.commits_today > 0 ? root.theme.textDim : root.theme.subtext0
-                                                font.pixelSize: 9
+                                                font.pixelSize: 10
                                                 font.bold: true
                                             }
                                         }
@@ -5092,7 +5174,7 @@ PanelWindow {
                                         Text {
                                             text: modelData.modified > 0 ? ("+" + modelData.modified + " modif") : "✓ clean"
                                             color: modelData.modified > 0 ? root.theme.textDim : root.theme.subtext0
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             font.bold: true
                                             font.family: "JetBrains Mono, monospace"
                                         }
@@ -5103,7 +5185,7 @@ PanelWindow {
                                         Layout.fillWidth: true
                                         text: modelData.last_commit || "-"
                                         color: root.theme.subtext1
-                                        font.pixelSize: 10
+                                        font.pixelSize: 11
                                         font.family: "JetBrains Mono, monospace"
                                         elide: Text.ElideRight
                                     }
@@ -5130,7 +5212,7 @@ PanelWindow {
                                                 Text {
                                                     text: "Staging"
                                                     color: root.theme.textDim
-                                                    font.pixelSize: 10
+                                                    font.pixelSize: 11
                                                     font.bold: true
                                                 }
                                             }
@@ -5159,7 +5241,7 @@ PanelWindow {
                                                 Text {
                                                     text: "Production"
                                                     color: root.theme.textDim
-                                                    font.pixelSize: 10
+                                                    font.pixelSize: 11
                                                     font.bold: true
                                                 }
                                             }
@@ -5189,7 +5271,7 @@ PanelWindow {
                                                 Text {
                                                     text: "VS Code"
                                                     color: root.theme.textDim
-                                                    font.pixelSize: 10
+                                                    font.pixelSize: 11
                                                 }
                                             }
                                             MouseArea {
@@ -5216,7 +5298,7 @@ PanelWindow {
                     Text {
                         text: "DEV SERVERS"
                         color: root.theme.subtext0
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.bold: true
                     }
 
@@ -5242,7 +5324,7 @@ PanelWindow {
                                 visible: root.devServers.length === 0
                                 text: root.bridgeReady ? "Tidak ada project dev server" : "Bridge belum siap…"
                                 color: root.theme.subtext0
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                             }
 
                             delegate: Rectangle {
@@ -5279,7 +5361,7 @@ PanelWindow {
                                             Text {
                                                 text: modelData.name
                                                 color: "#ffffff"
-                                                font.pixelSize: 11
+                                                font.pixelSize: 12
                                                 font.bold: true
                                                 elide: Text.ElideRight
                                                 Layout.fillWidth: true
@@ -5290,7 +5372,7 @@ PanelWindow {
                                             Layout.fillWidth: true
                                             elide: Text.ElideRight
                                             color: root.theme.subtext1
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             text: {
                                                 let parts = [];
                                                 if (devRow.php.available)
@@ -5315,7 +5397,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "serve"
                                             color: devRow.php.running ? root.theme.textDim : root.theme.subtext1
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5338,7 +5420,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "npm dev"
                                             color: devRow.npm.running ? root.theme.textDim : root.theme.subtext1
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5364,7 +5446,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "Start"
                                             color: devRow.availableCount > devRow.runningCount ? root.theme.textDim : root.theme.overlay
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5395,7 +5477,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: "Stop"
                                             color: devRow.runningCount > 0 ? root.theme.subtext1 : root.theme.overlay
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             font.bold: true
                                         }
                                         MouseArea {
@@ -5453,7 +5535,7 @@ PanelWindow {
                             Layout.fillWidth: true
                             elide: Text.ElideRight
                             color: root.interviewState === "error" ? "#fca5a5" : root.theme.text
-                            font.pixelSize: 10; font.bold: true
+                            font.pixelSize: 11; font.bold: true
                             text: root.interviewState === "listening"
                                   ? (root.interviewThinking ? "Menyusun jawaban…" : root.interviewSpeaking ? "Pewawancara berbicara…" : "Mendengarkan")
                                   : root.interviewState === "loading" ? "Menyiapkan…"
@@ -5505,7 +5587,7 @@ PanelWindow {
                                             anchors.centerIn: parent
                                             text: parent.modelData.label
                                             color: parent.chosen ? "#ffffff" : root.theme.subtext0
-                                            font.pixelSize: 10; font.bold: true
+                                            font.pixelSize: 11; font.bold: true
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -5521,7 +5603,7 @@ PanelWindow {
                         // Auto: saran jawaban otomatis setiap pertanyaan selesai
                         Row {
                             spacing: 5
-                            Text { anchors.verticalCenter: parent.verticalCenter; text: "Auto"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
+                            Text { anchors.verticalCenter: parent.verticalCenter; text: "Auto"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
                             Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 26; height: 14; radius: 7
@@ -5554,7 +5636,7 @@ PanelWindow {
                             implicitWidth: 52; implicitHeight: 24; radius: 12
                             color: usable && jawabHover.containsMouse ? root.theme.surface2 : root.theme.surface1
                             opacity: usable ? 1 : 0.45
-                            Text { anchors.centerIn: parent; text: "Jawab"; color: "#ffffff"; font.pixelSize: 10; font.bold: true }
+                            Text { anchors.centerIn: parent; text: "Jawab"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
                             MouseArea {
                                 id: jawabHover
                                 anchors.fill: parent
@@ -5576,7 +5658,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: root.interviewRunning ? "■  Stop" : "●  Mulai"
                                 color: root.interviewRunning ? "#fecaca" : "#1c1917"
-                                font.pixelSize: 10; font.bold: true
+                                font.pixelSize: 11; font.bold: true
                             }
                             MouseArea {
                                 id: ivStartHover
@@ -5603,7 +5685,7 @@ PanelWindow {
                                 width: parent.width
                                 wrapMode: Text.Wrap
                                 text: "QBot mendengarkan pertanyaan pewawancara, lalu menyarankan jawaban sesuai profilmu."
-                                color: root.theme.subtext1; font.pixelSize: 10
+                                color: root.theme.subtext1; font.pixelSize: 11
                             }
                         }
 
@@ -5632,14 +5714,14 @@ PanelWindow {
                                         Rectangle {
                                             width: 20; height: 20; radius: 10
                                             color: Qt.rgba(0.96, 0.62, 0.04, 0.18)
-                                            Text { anchors.centerIn: parent; text: modelData.n; color: "#fbbf24"; font.pixelSize: 10; font.bold: true }
+                                            Text { anchors.centerIn: parent; text: modelData.n; color: "#fbbf24"; font.pixelSize: 11; font.bold: true }
                                         }
-                                        Text { text: modelData.title; color: root.theme.text; font.pixelSize: 10; font.bold: true }
+                                        Text { text: modelData.title; color: root.theme.text; font.pixelSize: 11; font.bold: true }
                                         Text {
                                             Layout.fillWidth: true
                                             text: modelData.body
                                             color: root.theme.subtext1
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             font.family: modelData.n === "3" ? "JetBrains Mono, monospace" : "Inter, sans-serif"
                                             // Path boleh dipotong di mana saja; kalimat biasa per kata.
                                             wrapMode: modelData.n === "3" ? Text.WrapAnywhere : Text.Wrap
@@ -5680,7 +5762,7 @@ PanelWindow {
                                         implicitHeight: 16
                                         radius: 8
                                         color: Qt.rgba(0.96, 0.62, 0.04, 0.16)
-                                        Text { id: ivAnsLbl; anchors.centerIn: parent; text: "Saran jawaban"; color: "#fbbf24"; font.pixelSize: 9; font.bold: true }
+                                        Text { id: ivAnsLbl; anchors.centerIn: parent; text: "Saran jawaban"; color: "#fbbf24"; font.pixelSize: 10; font.bold: true }
                                     }
                                     Item { Layout.fillWidth: true }
                                     Text {
@@ -5694,7 +5776,7 @@ PanelWindow {
                                     Text {
                                         visible: root.interviewAnswers.length > 1
                                         text: (root.interviewAnswerIndex + 1) + " / " + root.interviewAnswers.length
-                                        color: root.theme.subtext1; font.pixelSize: 10
+                                        color: root.theme.subtext1; font.pixelSize: 11
                                     }
                                     Text {
                                         visible: root.interviewAnswers.length > 1
@@ -5712,7 +5794,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     text: root.interviewShownAnswer ? "“" + root.interviewShownAnswer.question + "”" : ""
                                     color: root.theme.subtext1
-                                    font.pixelSize: 10; font.italic: true
+                                    font.pixelSize: 11; font.italic: true
                                     wrapMode: Text.Wrap
                                     maximumLineCount: 2
                                     elide: Text.ElideRight
@@ -5736,7 +5818,7 @@ PanelWindow {
                                         color: root.interviewShownAnswer && root.interviewShownAnswer.error ? "#fca5a5"
                                              : root.interviewShownAnswer ? root.theme.text : root.theme.subtext0
                                         selectionColor: root.theme.surface2
-                                        font.pixelSize: root.interviewShownAnswer ? 14 : 11
+                                        font.pixelSize: root.interviewShownAnswer ? 14 : 12
                                         text: {
                                             let a = root.interviewShownAnswer;
                                             if (a) return a.error || a.text || "…";
@@ -5760,7 +5842,7 @@ PanelWindow {
                                 anchors.fill: parent
                                 anchors.margins: 8
                                 spacing: 4
-                                Text { text: "Transkrip"; color: root.theme.subtext1; font.pixelSize: 10; font.bold: true }
+                                Text { text: "Transkrip"; color: root.theme.subtext1; font.pixelSize: 11; font.bold: true }
 
                                 ListView {
                                     id: ivTranscriptView
@@ -5779,7 +5861,7 @@ PanelWindow {
                                         visible: root.interviewTranscript.length === 0
                                         text: "Ucapan pewawancara muncul di sini"
                                         color: root.theme.subtext0
-                                        font.pixelSize: 10
+                                        font.pixelSize: 11
                                     }
 
                                     delegate: Column {
@@ -5789,14 +5871,14 @@ PanelWindow {
                                         Text {
                                             text: modelData.time.slice(0, 5)
                                             color: root.theme.subtext0
-                                            font.pixelSize: 9
+                                            font.pixelSize: 10
                                             font.family: "JetBrains Mono, monospace"
                                         }
                                         Text {
                                             width: parent.width
                                             wrapMode: Text.Wrap
                                             color: root.theme.textDim
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             textFormat: Text.PlainText
                                             text: modelData.text
                                         }
