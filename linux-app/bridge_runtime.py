@@ -27,6 +27,7 @@ import uuid
 from bridge_client import MAX_BODY, runtime_directory
 from dev_servers import DevServerManager
 from interview import InterviewAssistant
+from screen_translate import ScreenTranslator
 from voice import VoiceAssistant
 
 IO_TIMEOUT = 5
@@ -352,6 +353,7 @@ class BridgeRuntime:
             dev_projects or [], dev_root or (Path.home() / "Projects/project-web"),
             emit=self.emit, directory=runtime_directory(), stop=self.stop)
         self.interview = InterviewAssistant(emit=self.emit)
+        self.translator = ScreenTranslator(emit=self.emit)
         self.voice = VoiceAssistant(emit=self.emit, launcher=self.launcher)
         self.lock = threading.RLock()
         self.pending = {}  # (session_id, request_id) -> ready/submitting/uncertain
@@ -699,6 +701,9 @@ class BridgeRuntime:
                 elif action == "interview_status":
                     self.interview.emit_status()
                     message = "Status interview diperbarui"
+                elif action == "translate_point":
+                    message = self.translator.start(data.get("x"), data.get("y"), data.get("bounds"),
+                                                    data.get("session", 0))
                 elif action == "voice_start":
                     message = self.voice.start()
                 elif action == "voice_stop":

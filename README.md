@@ -28,6 +28,7 @@ backend integrasi **Hermes Agent**.
 - **Catatan cepat** — `qs ... ipc call qbot note` (mis. `Mod+N`) membuka kolom teks di capsule; Enter simpan, Esc tutup.
 - **Alert dev server** — notifikasi saat `serve` atau `npm run dev` mati sendiri.
 - **HUD sistem** — volume, brightness, charger, baterai lemah (20/10/5%), dan perangkat Bluetooth tampil sebentar di capsule.
+- **Terjemah layar** — drag robot dari panel ke dekat teks: paragraf terdekat dibaca dengan OCR (tesseract) lalu diterjemahkan LLM Hermes. Bahasa OCR diatur lewat `HERMES_COUCOU_OCR_LANGS` (default `eng+spa`).
 - **Perintah suara** — "halo qbot, buka chromium dan buka youtube": dikenali lokal, dijalankan, dan dibalas dengan suara.
 - **Now Playing + lirik** — saat Spotify diputar island jadi mini player (cover berputar, baris lirik aktif, visualizer); tab **Musik** berisi cover, kontrol, dan lirik tersinkron dari [LRCLIB](https://lrclib.net) (hanya judul, artis, durasi yang dikirim).
 - **Efek suara** — bunyi saat izin masuk, task selesai, atau gagal (Sistem → Tools untuk mematikan).

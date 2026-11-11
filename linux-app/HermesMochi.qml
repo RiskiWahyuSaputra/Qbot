@@ -369,6 +369,78 @@ PanelWindow {
         onTriggered: root.closeQuickNote()
     }
 
+    // Terjemah layar: robot di-drag keluar island lalu dijatuhkan di dekat teks.
+    // idle | drag | capture (robot & island disembunyikan untuk difoto) | working | done | error
+    property string translateState: "idle"
+    property int translateSession: 0
+    property real translateX: 0
+    property real translateY: 0
+    property string translateSource: ""
+    property string translateText: ""
+    property string translateError: ""
+    readonly property bool robotDragging: translateState === "drag"
+    readonly property bool translateOverlayOn: translateState !== "idle" && translateState !== "capture"
+    readonly property real windowLeft: root.screen ? (root.screen.width - root.width) / 2 : 0
+
+    function startRobotDrag(point) {
+        translateSession++;
+        translateSource = "";
+        translateText = "";
+        translateError = "";
+        translateState = "drag";
+        moveRobotDrag(point);
+    }
+
+    function moveRobotDrag(point) {
+        translateX = windowLeft + point.x;
+        translateY = point.y;
+    }
+
+    function dropRobot() {
+        let capsule = islandCapsule.mapToItem(null, 0, 0);
+        let insideIsland = translateX >= windowLeft + capsule.x && translateX <= windowLeft + capsule.x + islandCapsule.width
+                           && translateY <= capsule.y + islandCapsule.height;
+        translateState = insideIsland ? "idle" : "capture";
+        if (insideIsland) return;
+        kbdMode = false;
+        islandExpanded = false;
+        translateCapture.restart();
+    }
+
+    function closeTranslate() {
+        translateSession++;
+        translateState = "idle";
+    }
+
+    function handleTranslate(msg) {
+        if (msg.session !== translateSession || translateState === "idle") return;
+        if (msg.event === "TranslateChunk") {
+            translateText += msg.text || "";
+        } else if (msg.state === "error") {
+            translateError = msg.message || "Gagal menerjemahkan";
+            translateState = "error";
+        } else {
+            if (msg.source) translateSource = msg.source;
+            translateState = msg.state;
+        }
+    }
+
+    // Tunggu animasi island selesai supaya tidak ikut terfoto.
+    Timer {
+        id: translateCapture
+        interval: 420
+        onTriggered: {
+            let area = root.screen;
+            root.sendBridgeCommand({action: "translate_point", x: Math.round(root.translateX + area.x), y: Math.round(root.translateY + area.y),
+                                    bounds: [area.x, area.y, area.width, area.height], session: root.translateSession});
+        }
+    }
+    Timer {
+        interval: root.translateState === "error" ? 4000 : 30000
+        running: (root.translateState === "done" || root.translateState === "error") && !translateBubbleHover.hovered
+        onTriggered: root.closeTranslate()
+    }
+
     function papirusIcon(group, name) {
         return "file:///usr/share/icons/Papirus/24x24/" + group + "/" + name + ".svg";
     }
@@ -1473,7 +1545,7 @@ PanelWindow {
         // (notes/media refresh); sisanya — termasuk dev server — harus kasih
         // umpan balik supaya sekali klik langsung terasa.
         const silent = ["Notes saved", "Command completed", "Status dev server diperbarui",
-                        "Membuat jawaban…", "Status suara diperbarui", "Memproses perintah…"];
+                        "Membuat jawaban…", "Status suara diperbarui", "Memproses perintah…", "Menerjemahkan…"];
         if (ok && (!message || silent.indexOf(message) !== -1)) return;
         toastPrevStatus = currentStatus;
         toastPrevDetail = activeDetail;
@@ -1669,6 +1741,11 @@ PanelWindow {
                 break;
             }
             showActionToast(!!msg.ok, msg.message || "");
+            break;
+
+        case "TranslateStatus":
+        case "TranslateChunk":
+            root.handleTranslate(msg);
             break;
 
         case "DevServerDied":
@@ -2231,7 +2308,7 @@ PanelWindow {
             interval: 350
             repeat: false
             onTriggered: {
-                if (!capsuleHover.hovered && !windowHover.hovered && !root.isNotifying) {
+                if (!capsuleHover.hovered && !windowHover.hovered && !root.isNotifying && !root.robotDragging) {
                     root.islandExpanded = false;
                 }
             }
@@ -3179,11 +3256,19 @@ PanelWindow {
                             QCoreBot {
                                 id: largeAvatar
                                 anchors.centerIn: parent
+                                opacity: root.robotDragging ? 0.15 : 1
                                 size: 126
                                 avatarType: root.menuAvatar
                                 expression: root.isDizzy ? "dizzy" : (root.isAngry ? "angry" : (root.hermesWorking ? "working" : (root.ambientExpression || "proud")))
                                 targetLookX: root.cursorLookX
                                 targetLookY: root.cursorLookY
+                            }
+
+                            // Drag robot keluar island untuk menerjemahkan teks di layar.
+                            DragHandler {
+                                target: null
+                                onActiveChanged: active ? root.startRobotDrag(centroid.scenePosition) : root.dropRobot()
+                                onCentroidChanged: if (active) root.moveRobotDrag(centroid.scenePosition)
                             }
 
                             // Pointer diam di atas avatar (bukan seluruh panel kiri) → kesal.
@@ -4299,10 +4384,12 @@ PanelWindow {
 
                         // Satu baki untuk semua agent, seirama dengan filter tab Catatan.
                         Rectangle {
-                            implicitWidth: agentTray.implicitWidth + 4
-                            implicitHeight: 26
-                            radius: 13
+                            implicitWidth: agentTray.implicitWidth + 6
+                            implicitHeight: 32
+                            radius: 16
                             color: root.theme.surface0
+                            border.width: 1
+                            border.color: Qt.rgba(1, 1, 1, 0.05)
 
                             Row {
                                 id: agentTray
@@ -4325,9 +4412,9 @@ PanelWindow {
                                     : (state === "none" ? root.theme.overlay : root.stateColor(state))
                                 readonly property bool dim: state === "none"
 
-                                width: chipRow.implicitWidth + 14
-                                height: 22
-                                radius: 11
+                                width: chipRow.implicitWidth + 12
+                                height: 26
+                                radius: 13
                                 color: agentChip.state === "waiting" ? Qt.rgba(0.976, 0.451, 0.086, 0.16)
                                      : (chipHover.containsMouse ? root.theme.surface1 : "transparent")
                                 Behavior on color { ColorAnimation { duration: 200 } }
@@ -4337,17 +4424,27 @@ PanelWindow {
                                     anchors.centerIn: parent
                                     spacing: 5
                                     opacity: agentChip.dim ? 0.45 : 1.0
-                                    SourceLogo { kind: agentChip.modelData; size: 14; anchors.verticalCenter: parent.verticalCenter }
-                                    Rectangle {
+                                    // Logo dengan titik status sebagai lencana di pojok kanan bawah.
+                                    Item {
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 6; height: 6; radius: 3
-                                        color: agentChip.tint
-                                        SequentialAnimation on opacity {
-                                            running: agentChip.state === "working" || agentChip.state === "waiting"
-                                            loops: Animation.Infinite
-                                            onRunningChanged: if (!running) parent.opacity = 1
-                                            NumberAnimation { to: 0.3; duration: 600; easing.type: Easing.InOutSine }
-                                            NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutSine }
+                                        width: 20; height: 20
+                                        SourceLogo { anchors.fill: parent; kind: agentChip.modelData; size: 20 }
+                                        Rectangle {
+                                            anchors.right: parent.right
+                                            anchors.bottom: parent.bottom
+                                            anchors.rightMargin: -2
+                                            anchors.bottomMargin: -2
+                                            width: 9; height: 9; radius: 4.5
+                                            color: agentChip.tint
+                                            border.width: 2
+                                            border.color: root.theme.surface0
+                                            SequentialAnimation on opacity {
+                                                running: agentChip.state === "working" || agentChip.state === "waiting"
+                                                loops: Animation.Infinite
+                                                onRunningChanged: if (!running) parent.opacity = 1
+                                                NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutSine }
+                                                NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutSine }
+                                            }
                                         }
                                     }
                                     UiText {
@@ -4418,8 +4515,11 @@ PanelWindow {
                         readonly property color tint: sess ? root.stateColor(sess.state) : root.theme.overlay
                         readonly property bool live: !!sess && (sess.state === "working" || sess.state === "waiting")
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 58
-                        radius: 14
+                        Layout.preferredHeight: 62
+                        radius: 16
+                        border.width: 1
+                        border.color: mainCard.live ? Qt.rgba(mainCard.tint.r, mainCard.tint.g, mainCard.tint.b, 0.28) : Qt.rgba(1, 1, 1, 0.05)
+                        Behavior on border.color { ColorAnimation { duration: 240 } }
                         color: sess && sess.state === "waiting" ? Qt.rgba(0.976, 0.451, 0.086, 0.12) : root.theme.surface0
                         Behavior on color { ColorAnimation { duration: 200 } }
 
@@ -4432,10 +4532,10 @@ PanelWindow {
 
                             // Logo dalam cincin status; cincin berdenyut saat sesi aktif.
                             Item {
-                                implicitWidth: 34; implicitHeight: 34
+                                implicitWidth: 40; implicitHeight: 40
                                 Rectangle {
                                     anchors.fill: parent
-                                    radius: 17
+                                    radius: 20
                                     color: root.theme.base
                                     border.width: 1.5
                                     border.color: mainCard.tint
@@ -4446,16 +4546,27 @@ PanelWindow {
                                         ColorAnimation { to: mainCard.tint; duration: 700; easing.type: Easing.InOutSine }
                                     }
                                 }
-                                SourceLogo { anchors.centerIn: parent; kind: mainCard.sess ? mainCard.sess.agent : "claude"; size: 18 }
+                                SourceLogo { anchors.centerIn: parent; kind: mainCard.sess ? mainCard.sess.agent : "claude"; size: 30 }
                             }
 
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                UiText {
-                                    text: mainCard.sess ? (mainCard.sess.project || "?") : ""
-                                    color: root.theme.text; font.pixelSize: 13; font.bold: true
-                                    elide: Text.ElideRight; Layout.fillWidth: true
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    UiText {
+                                        text: mainCard.sess ? (mainCard.sess.project || "?") : ""
+                                        color: root.theme.text; font.pixelSize: 13; font.bold: true
+                                        elide: Text.ElideRight
+                                        Layout.maximumWidth: implicitWidth
+                                        Layout.fillWidth: true
+                                    }
+                                    UiText {
+                                        text: mainCard.sess ? root.agentName(mainCard.sess.agent) : ""
+                                        color: root.theme.subtext0; font.pixelSize: 10
+                                    }
+                                    Item { Layout.fillWidth: true }
                                 }
                                 UiText {
                                     visible: text !== ""
@@ -4513,7 +4624,7 @@ PanelWindow {
                                 id: otherSess
                                 required property var modelData
                                 spacing: 5
-                                SourceLogo { kind: otherSess.modelData.agent; size: 12; anchors.verticalCenter: parent.verticalCenter }
+                                SourceLogo { kind: otherSess.modelData.agent; size: 15; anchors.verticalCenter: parent.verticalCenter }
                                 UiText {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: Math.min(implicitWidth, 110)
@@ -4586,7 +4697,7 @@ PanelWindow {
                                 // Mulai & selesai sudah jelas dari ikon; label hanya untuk kejadian lain.
                                 readonly property bool notable: modelData.kind !== "start" && modelData.kind !== "done"
                                 width: historyView.width
-                                height: 24
+                                height: 26
                                 radius: 8
                                 color: histHover.hovered ? root.theme.surface0 : "transparent"
                                 HoverHandler { id: histHover }
@@ -4603,7 +4714,7 @@ PanelWindow {
                                         horizontalAlignment: Text.AlignHCenter
                                         Layout.preferredWidth: 12
                                     }
-                                    SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 13 }
+                                    SourceLogo { kind: histRow.modelData.agent || "hermes"; size: 16 }
                                     UiText {
                                         text: histRow.modelData.project || "—"
                                         color: root.theme.textDim; font.pixelSize: 11
@@ -5231,6 +5342,131 @@ PanelWindow {
                 root.restoreBaseline();
             } else if (root.currentStatus === root.greetText) {
                 root.restoreBaseline();
+            }
+        }
+    }
+
+    // Robot dan gelembung terjemahan digambar di seluruh layar; hanya gelembung menerima klik.
+    PanelWindow {
+        id: translateOverlay
+        screen: root.screen
+        visible: root.translateOverlayOn
+        anchors { top: true; bottom: true; left: true; right: true }
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "qbot-translate"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        mask: Region { item: translateBubble }
+
+        // Sengaja 2D: QCoreBot memakai Quick3D, dan View3D di window kedua membuat QBot crash.
+        Rectangle {
+            readonly property color tint: root.translateState === "error" ? "#f87171"
+                                        : root.translateState === "working" ? "#38bdf8" : "#22d3ee"
+            x: root.translateX - width / 2
+            y: root.translateY - height / 2
+            width: 44
+            height: 44
+            radius: 22
+            color: root.theme.base
+            border.width: 3
+            border.color: tint
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 8
+                Repeater {
+                    model: 2
+                    Rectangle {
+                        width: 7
+                        height: root.translateState === "done" ? 4 : 12
+                        radius: 3
+                        color: parent.parent.tint
+                        Behavior on height { NumberAnimation { duration: 140 } }
+                    }
+                }
+            }
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.top
+                anchors.bottomMargin: 3
+                width: 3; height: 6; radius: 1
+                color: parent.tint
+            }
+        }
+
+        Rectangle {
+            id: translateBubble
+            readonly property bool below: root.translateY + 44 + height < translateOverlay.height - 12
+            visible: root.translateState !== "drag"
+            width: 380
+            height: visible ? bubbleColumn.implicitHeight + 24 : 0
+            x: Math.max(12, Math.min(translateOverlay.width - width - 12, root.translateX - width / 2))
+            y: below ? root.translateY + 44 : Math.max(12, root.translateY - 44 - height)
+            radius: 16
+            color: root.theme.base
+            border.color: root.theme.surface1
+            HoverHandler { id: translateBubbleHover }
+
+            ColumnLayout {
+                id: bubbleColumn
+                x: 14
+                y: 12
+                width: parent.width - 28
+                spacing: 6
+
+                UiText {
+                    visible: text !== ""
+                    Layout.fillWidth: true
+                    text: root.translateSource
+                    color: root.theme.subtext0
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+                UiText {
+                    Layout.fillWidth: true
+                    text: root.translateState === "error" ? root.translateError : (root.translateText || "Menerjemahkan…")
+                    color: root.translateState === "error" ? "#f87171" : (root.translateText ? root.theme.text : root.theme.subtext1)
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 12
+                    elide: Text.ElideRight
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 14
+                    Item { Layout.fillWidth: true }
+                    UiText {
+                        id: translateCopy
+                        property bool copied: false
+                        visible: root.translateState === "done"
+                        text: copied ? "Tersalin" : "Salin"
+                        color: root.theme.textDim
+                        font.pixelSize: 11
+                        Timer { id: translateCopied; interval: 1500; onTriggered: translateCopy.copied = false }
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                Quickshell.execDetached(["wl-copy", "--", root.translateText]);
+                                translateCopy.copied = true;
+                                translateCopied.restart();
+                            }
+                        }
+                    }
+                    UiText {
+                        text: "Tutup"
+                        color: root.theme.subtext1
+                        font.pixelSize: 11
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.closeTranslate()
+                        }
+                    }
+                }
             }
         }
     }
